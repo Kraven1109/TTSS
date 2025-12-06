@@ -41,16 +41,16 @@ else:
 
 # Create subdirectories
 tts_reference_path = os.path.join(tts_models_path, "reference_audio")
-tts_coqui_path = os.path.join(tts_models_path, "coqui")
+tts_xtts_path = os.path.join(tts_models_path, "xtts")  # For XTTS-v2 / Auralis models
 tts_voices_path = os.path.join(tts_models_path, "voices")
 
-for path in [output_path, tts_models_path, tts_reference_path, tts_coqui_path, tts_voices_path]:
+for path in [output_path, tts_models_path, tts_reference_path, tts_xtts_path, tts_voices_path]:
     os.makedirs(path, exist_ok=True)
 
 # =============================================================================
 # TTS Engine Registry
 # =============================================================================
-TTS_ENGINES = ["pyttsx3", "edge-tts", "coqui-tts"]
+TTS_ENGINES = ["pyttsx3", "edge-tts", "xtts-v2"]
 
 def _get_edge_tts_cli():
     """Find edge-tts CLI executable path."""
@@ -134,22 +134,25 @@ def get_edge_tts_voices():
         "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural",
         ]
 
-def get_coqui_models():
-    """Get available Coqui TTS models from local directory."""
+def get_xtts_models():
+    """Get available XTTS models (Auralis-compatible)."""
     models = []
-    if os.path.exists(tts_coqui_path):
-        for item in os.listdir(tts_coqui_path):
-            item_path = os.path.join(tts_coqui_path, item)
-            # Check for model config or checkpoint
-            if os.path.isdir(item_path):
-                if any(f.endswith(('.pth', '.ckpt', 'config.json')) for f in os.listdir(item_path)):
-                    models.append(item)
-            elif item.endswith(('.pth', '.ckpt')):
-                models.append(item)
     
-    # Add built-in Coqui models
-    builtin = ["tts_models/en/ljspeech/tacotron2-DDC", "tts_models/en/ljspeech/vits"]
-    return models + builtin if models else builtin
+    # Check for local converted models in xtts folder
+    xtts_path = os.path.join(tts_models_path, "xtts")
+    if os.path.exists(xtts_path):
+        for item in os.listdir(xtts_path):
+            item_path = os.path.join(xtts_path, item)
+            if os.path.isdir(item_path):
+                # Look for safetensors (Auralis format)
+                if any(f.endswith('.safetensors') for f in os.listdir(item_path)):
+                    models.append(item)
+    
+    # Default HuggingFace models (Auralis)
+    hf_models = [
+        "AstraMindAI/xttsv2",  # Auralis default
+    ]
+    return models + hf_models if models else hf_models
 
 def get_reference_audio_files():
     """Get reference audio files for voice cloning."""
@@ -169,7 +172,7 @@ class TTSSTextToSpeech:
     Text-to-Speech synthesis with multiple engine support.
     - pyttsx3: Offline, uses system voices (SAPI/NSSpeech/espeak)
     - edge-tts: Microsoft Edge TTS (online, high quality, free)
-    - coqui-tts: Neural TTS with voice cloning (local GPU)
+    - xtts-v2: Neural TTS with voice cloning via Auralis (GPU, Python 3.10+)
     """
     
     @classmethod
@@ -177,7 +180,7 @@ class TTSSTextToSpeech:
         # Get voices for each engine
         pyttsx3_voices = get_pyttsx3_voices()
         edge_voices = get_edge_tts_voices()
-        coqui_models = get_coqui_models()
+        xtts_models = get_xtts_models()
         
         return {
             "required": {
@@ -195,7 +198,7 @@ class TTSSTextToSpeech:
                 # Voice dropdowns for each engine
                 "edge_voice": (edge_voices, {"default": "en-US-AriaNeural"}),
                 "pyttsx3_voice": (pyttsx3_voices, {"default": pyttsx3_voices[0] if pyttsx3_voices else "default"}),
-                "coqui_model": (coqui_models, {"default": coqui_models[0] if coqui_models else ""}),
+                "xtts_model": (xtts_models, {"default": xtts_models[0] if xtts_models else "AstraMindAI/xttsv2"}),
             },
             "optional": {
                 "text_input": ("STRING", {"forceInput": True, "multiline": True}),
@@ -211,7 +214,7 @@ class TTSSTextToSpeech:
     
     def synthesize(self, text, engine, speed, 
                    pyttsx3_voice="default", edge_voice="en-US-AriaNeural",
-                   coqui_model="tts_models/en/ljspeech/vits", reference_audio="(none)",
+                   xtts_model="AstraMindAI/xttsv2", reference_audio="(none)",
                    text_input=None, srt_input=None):
         """Generate speech from text using selected engine."""
         
@@ -220,13 +223,13 @@ class TTSSTextToSpeech:
         if not final_text:
             raise ValueError("[TTSS] No text provided for synthesis")
         
-        # Select voice based on engine
+        # Select voice/model based on engine
         if engine == "pyttsx3":
             voice_name = pyttsx3_voice
         elif engine == "edge-tts":
             voice_name = edge_voice
-        elif engine == "coqui-tts":
-            voice_name = coqui_model
+        elif engine == "xtts-v2":
+            voice_name = xtts_model
         else:
             voice_name = ""
         
@@ -237,18 +240,21 @@ class TTSSTextToSpeech:
         timestamp = int(time.time())
         output_file = os.path.join(output_path, f"ttss_{engine}_{timestamp}_{text_hash}.wav")
         
-        # Handle reference audio for Coqui
+        # Handle reference audio for XTTS voice cloning
         ref_audio_path = None
         if reference_audio and reference_audio != "(none)":
-            ref_audio_path = os.path.join(tts_reference_path, reference_audio)
+            if os.path.isabs(reference_audio):
+                ref_audio_path = reference_audio
+            else:
+                ref_audio_path = os.path.join(tts_reference_path, reference_audio)
         
         # Route to appropriate engine
         if engine == "pyttsx3":
             self._synth_pyttsx3(final_text, output_file, voice_name, speed)
         elif engine == "edge-tts":
             self._synth_edge_tts(final_text, output_file, voice_name, speed)
-        elif engine == "coqui-tts":
-            self._synth_coqui(final_text, output_file, voice_name, speed, ref_audio_path)
+        elif engine == "xtts-v2":
+            self._synth_xtts(final_text, output_file, voice_name, ref_audio_path)
         else:
             raise ValueError(f"[TTSS] Unknown engine: {engine}")
         
@@ -354,28 +360,53 @@ class TTSSTextToSpeech:
         if result_holder['error']:
             raise result_holder['error']
     
-    def _synth_coqui(self, text, output_file, model_name, speed, reference_audio):
-        """Synthesize using Coqui TTS (neural, local)."""
+    def _synth_xtts(self, text, output_file, model_name, reference_audio):
+        """Synthesize using XTTS-v2 via Auralis (Python 3.10+ compatible)."""
         try:
-            from TTS.api import TTS
+            from auralis import TTS, TTSRequest
         except ImportError:
-            raise ImportError("[TTSS] Coqui TTS not installed. Run: pip install TTS")
+            raise ImportError(
+                "[TTSS] Auralis not installed. Run: pip install auralis\n"
+                "Auralis provides XTTS-v2 support for Python 3.10+ (unlike Coqui TTS which requires Python <3.12)"
+            )
         
-        model = model_name if model_name else "tts_models/en/ljspeech/vits"
+        # Initialize TTS model
+        model = model_name if model_name else "AstraMindAI/xttsv2"
         
-        # Check if it's a local model path
-        local_model_path = os.path.join(tts_coqui_path, model_name) if model_name else None
+        # Check if local path or HuggingFace model
+        xtts_local_path = os.path.join(tts_models_path, "xtts", model_name) if model_name else None
         
-        if local_model_path and os.path.exists(local_model_path):
-            tts = TTS(model_path=local_model_path)
+        if xtts_local_path and os.path.exists(xtts_local_path):
+            # Local converted model
+            tts = TTS().from_pretrained(xtts_local_path)
         else:
-            tts = TTS(model_name=model)
+            # HuggingFace model
+            tts = TTS().from_pretrained(model, gpt_model='AstraMindAI/xtts2-gpt')
         
-        # Voice cloning with reference audio
+        # Create TTS request
+        request_kwargs = {"text": text}
+        
+        # Voice cloning with reference audio (required for XTTS)
         if reference_audio and os.path.exists(reference_audio):
-            tts.tts_to_file(text=text, file_path=output_file, speaker_wav=reference_audio)
+            request_kwargs["speaker_files"] = [reference_audio]
         else:
-            tts.tts_to_file(text=text, file_path=output_file, speed=speed)
+            # XTTS requires reference audio for voice cloning
+            # Use a default reference if available
+            default_ref = os.path.join(tts_reference_path, "default.wav")
+            if os.path.exists(default_ref):
+                request_kwargs["speaker_files"] = [default_ref]
+            else:
+                raise ValueError(
+                    "[TTSS] XTTS-v2 requires reference audio for voice cloning.\n"
+                    "Please provide a reference audio file or place a 'default.wav' in:\n"
+                    f"  {tts_reference_path}"
+                )
+        
+        request = TTSRequest(**request_kwargs)
+        
+        # Generate speech
+        output = tts.generate_speech(request)
+        output.save(output_file)
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""

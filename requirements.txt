@@ -9,9 +9,10 @@ srt>=3.5.0          # SRT subtitle parsing
 # === EDGE-TTS (recommended - online, high quality, free) ===
 edge-tts>=6.1.0     # Microsoft Edge TTS API
 
-# === COQUI TTS (optional - neural TTS, requires GPU) ===
-# Uncomment for advanced voice cloning with neural models
-# TTS>=0.22.0         # Coqui TTS library
+# === XTTS-v2 / Auralis (optional - neural TTS with voice cloning) ===
+# Works with Python 3.10+ (unlike Coqui TTS which requires Python <3.12)
+# Uncomment for advanced voice cloning with XTTS-v2 neural models
+# auralis>=0.2.8      # Auralis - XTTS-v2 wrapper for Python 3.10+
 # torch>=2.0.0        # PyTorch for neural TTS
 
 # Audio processing (for combine/save audio features)

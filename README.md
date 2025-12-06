@@ -7,9 +7,9 @@ Multi-engine Text-to-Speech nodes for ComfyUI with voice cloning support.
 - **🎤 Multiple TTS Engines**:
   - `pyttsx3` - Offline, uses system voices (Windows SAPI, macOS, Linux espeak)
   - `edge-tts` - Microsoft Edge TTS (online, high quality, free, 400+ voices)
-  - `coqui-tts` - Neural TTS with voice cloning (local GPU)
+  - `xtts-v2` - Neural TTS with voice cloning via Auralis (GPU, Python 3.10+)
 
-- **🎙️ Voice Cloning**: Clone any voice using reference audio
+- **🎙️ Voice Cloning**: Clone any voice using reference audio (XTTS-v2)
 - **🌍 Multi-language**: 100+ languages supported via edge-tts
 - **📝 SRT Support**: Read subtitles directly for TTS
 - **🔗 Audio Combining**: Merge multiple audio files with crossfade
@@ -18,13 +18,13 @@ Multi-engine Text-to-Speech nodes for ComfyUI with voice cloning support.
 
 ### Via ComfyUI Manager (Recommended)
 1. Open ComfyUI Manager
-2. Search for "TTSS" or paste: `https://github.com/your-username/comfyUI-TTSS.git`
+2. Search for "TTSS" or paste: `https://github.com/Kraven1109/TTSS.git`
 3. Click Install and restart ComfyUI
 
 ### Manual Installation
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/your-username/comfyUI-TTSS.git
+git clone https://github.com/Kraven1109/TTSS.git comfyUI-TTSS
 cd comfyUI-TTSS
 pip install -r requirements.txt
 ```
@@ -33,8 +33,7 @@ pip install -r requirements.txt
 
 | Node | Icon | Description |
 |------|------|-------------|
-| `TTSSTextToSpeech` | 🔊 | Main TTS node - supports all 3 engines |
-| `TTSSVoiceSelector` | 🎤 | Select voice from dropdown by engine |
+| `TTSSTextToSpeech` | 🔊 | Main TTS node - supports all 3 engines with built-in voice selection |
 | `TTSSLoadReferenceAudio` | 🎙️ | Load reference audio for voice cloning |
 | `TTSSLoadAudio` | 📂 | Load audio from input directory |
 | `TTSSLoadSRT` | 📄 | Load SRT subtitle file |
@@ -51,7 +50,7 @@ pip install -r requirements.txt
 
 ### 2. edge-tts (Recommended)
 - ✅ High quality Microsoft neural voices
-- ✅ 400+ voices in 100+ languages
+- ✅ 550+ voices in 100+ languages
 - ✅ Free, no API key required
 - ⚠️ Requires internet connection
 
@@ -62,11 +61,18 @@ pip install -r requirements.txt
 - `ja-JP-NanamiNeural` - Japanese female
 - `zh-CN-XiaoxiaoNeural` - Chinese female
 
-### 3. coqui-tts (Neural + Voice Cloning)
-- ✅ Highest quality neural TTS
-- ✅ Voice cloning with reference audio
-- ⚠️ Requires GPU and `pip install TTS`
-- ⚠️ Larger model download
+### 3. xtts-v2 (Neural + Voice Cloning via Auralis)
+- ✅ Highest quality neural TTS with voice cloning
+- ✅ Works with Python 3.10+ (ComfyUI compatible!)
+- ✅ Clone any voice with just 6 seconds of audio
+- ✅ 17 languages supported
+- ⚠️ Requires GPU and `pip install auralis`
+- ⚠️ Requires reference audio for synthesis
+
+**Why Auralis instead of Coqui TTS?**
+- Coqui TTS requires Python <3.12, but ComfyUI uses Python 3.12/3.13
+- Auralis wraps XTTS-v2 and works with Python 3.10+
+- Same XTTS-v2 quality, modern Python support!
 
 ## Directory Structure
 
@@ -74,8 +80,8 @@ pip install -r requirements.txt
 ComfyUI/
 ├── models/
 │   └── tts/                    # TTS model directory
-│       ├── reference_audio/    # Voice cloning reference files
-│       ├── coqui/              # Coqui TTS models
+│       ├── reference_audio/    # Voice cloning reference files (.wav, 6+ seconds)
+│       ├── xtts/               # XTTS-v2 / Auralis models
 │       └── voices/             # Custom voice models
 ├── input/                      # Audio/SRT files for loading
 └── output/                     # Generated audio output
@@ -88,18 +94,13 @@ ComfyUI/
 [🔊 Text to Speech] → [🎧 Preview Audio]
      ↳ text: "Hello world"
      ↳ engine: edge-tts
+     ↳ edge_voice: en-US-AriaNeural
 ```
 
-### With Voice Selection (Piped)
-```
-[🎤 Voice Selector] ──┬─ voice_name ──→ [🔊 Text to Speech] → [🎧 Preview Audio]
-                      └─ engine ─────→      ↳ engine_override
-```
-
-### Voice Cloning (Coqui)
+### Voice Cloning (XTTS-v2)
 ```
 [🎙️ Load Reference Audio] ── reference_audio ──→ [🔊 Text to Speech] → [🎧 Preview Audio]
-                                                      ↳ engine: coqui-tts
+                                                      ↳ engine: xtts-v2
 ```
 
 ### With ComfyUI-LLama (Image to Speech)
@@ -126,26 +127,17 @@ ComfyUI/
 ### TTSSTextToSpeech 🔊
 **Inputs:**
 - `text` (STRING) - Text to synthesize
-- `engine` (dropdown) - pyttsx3 / edge-tts / coqui-tts
-- `speed` (FLOAT) - 0.5 to 2.0
+- `engine` (dropdown) - pyttsx3 / edge-tts / xtts-v2
+- `speed` (FLOAT) - 0.5 to 2.0 (pyttsx3 & edge-tts only)
+- `edge_voice` (dropdown) - Select from 550+ Microsoft Edge voices
+- `pyttsx3_voice` (dropdown) - Select system voice
+- `xtts_model` (dropdown) - Select XTTS-v2 model
 - `text_input` (STRING, optional) - Piped text input
-- `voice_name` (STRING, optional) - Voice name from Voice Selector
-- `engine_override` (STRING, optional) - Engine from Voice Selector
 - `srt_input` (SRT, optional) - SRT file path
-- `reference_audio` (AUDIOPATH, optional) - For voice cloning
+- `reference_audio` (AUDIOPATH, optional) - For XTTS-v2 voice cloning
 
 **Outputs:**
 - `audio_path` (AUDIOPATH)
-
-### TTSSVoiceSelector 🎤
-**Inputs:**
-- `engine` (dropdown) - Select TTS engine
-- `pyttsx3_voice` / `edge_voice` / `coqui_model` (dropdowns)
-- `custom_voice` (STRING, optional)
-
-**Outputs:**
-- `voice_name` (STRING) → Connect to Text to Speech `voice_name`
-- `engine` (STRING) → Connect to Text to Speech `engine_override`
 
 ## Requirements
 
@@ -162,12 +154,12 @@ pydub>=0.25.1
 edge-tts>=6.1.0
 ```
 
-### Full (with Coqui TTS)
+### Full (with XTTS-v2 voice cloning via Auralis)
 ```
 pyttsx3>=2.90
 pydub>=0.25.1
 edge-tts>=6.1.0
-TTS>=0.22.0
+auralis>=0.2.8    # XTTS-v2 for Python 3.10+ (works with ComfyUI!)
 torch>=2.0.0
 ```
 
@@ -186,6 +178,7 @@ MIT License
 
 ## Acknowledgements
 
+- [Auralis](https://github.com/astramind-ai/Auralis) - XTTS-v2 wrapper for Python 3.10+
 - [edge-tts](https://github.com/rany2/edge-tts) - Microsoft Edge TTS wrapper
-- [Coqui TTS](https://github.com/coqui-ai/TTS) - Neural TTS library
+- [XTTS-v2](https://huggingface.co/coqui/XTTS-v2) - Voice cloning neural TTS
 - [pyttsx3](https://github.com/nateshmbhat/pyttsx3) - Offline TTS
