@@ -52,6 +52,22 @@ for path in [output_path, tts_models_path, tts_reference_path, tts_coqui_path, t
 # =============================================================================
 TTS_ENGINES = ["pyttsx3", "edge-tts", "coqui-tts"]
 
+def _get_edge_tts_cli():
+    """Find edge-tts CLI executable path."""
+    import sys
+    # Try Scripts folder in Python environment
+    python_dir = os.path.dirname(sys.executable)
+    scripts_dir = os.path.join(python_dir, "Scripts")
+    edge_tts_exe = os.path.join(scripts_dir, "edge-tts.exe")
+    if os.path.exists(edge_tts_exe):
+        return edge_tts_exe
+    # Try without .exe (Linux/Mac)
+    edge_tts_bin = os.path.join(scripts_dir, "edge-tts")
+    if os.path.exists(edge_tts_bin):
+        return edge_tts_bin
+    # Fallback to PATH
+    return "edge-tts"
+
 def get_pyttsx3_voices():
     """Get available pyttsx3 system voices."""
     try:
@@ -85,16 +101,21 @@ def get_edge_tts_voices():
     
     # Try to fetch using edge-tts CLI
     try:
+        edge_tts_cmd = _get_edge_tts_cli()
         result = subprocess.run(
-            ['edge-tts', '--list-voices'],
+            [edge_tts_cmd, '--list-voices'],
             capture_output=True, text=True, timeout=30
         )
         if result.returncode == 0:
             voices = []
-            for line in result.stdout.strip().split('\n'):
-                if line.startswith('Name:'):
-                    voice_name = line.split('Name:')[1].strip()
-                    voices.append(voice_name)
+            lines = result.stdout.strip().split('\n')
+            # Skip header lines (Name, ----)
+            for line in lines[2:]:  # Skip first 2 header lines
+                if line.strip():
+                    # First column is voice name (e.g., "af-ZA-AdriNeural")
+                    parts = line.split()
+                    if parts and 'Neural' in parts[0]:
+                        voices.append(parts[0])
             
             if voices:
                 # Cache voices
@@ -256,8 +277,9 @@ class TTSSTextToSpeech:
         rate = f"+{int((speed - 1) * 100)}%" if speed >= 1 else f"{int((speed - 1) * 100)}%"
         
         # Use edge-tts CLI to avoid asyncio conflicts with ComfyUI
+        edge_tts_cmd = _get_edge_tts_cli()
         cmd = [
-            'edge-tts',
+            edge_tts_cmd,
             '--voice', voice,
             '--rate', rate,
             '--text', text,
