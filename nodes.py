@@ -8,6 +8,8 @@ import os
 import time
 import json
 import hashlib
+import subprocess
+import threading
 
 try:
     import folder_paths
@@ -81,33 +83,34 @@ def get_edge_tts_voices():
         except:
             pass
     
-    # Fetch fresh list
+    # Try to fetch using edge-tts CLI
     try:
-        import asyncio
-        import edge_tts
-        
-        async def fetch_voices():
-            voices = await edge_tts.list_voices()
-            return [v['ShortName'] for v in voices]
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        voices = loop.run_until_complete(fetch_voices())
-        loop.close()
-        
-        # Cache voices
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump({'timestamp': time.time(), 'voices': voices}, f)
-        
-        return voices if voices else ["en-US-AriaNeural"]
+        result = subprocess.run(
+            ['edge-tts', '--list-voices'],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            voices = []
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('Name:'):
+                    voice_name = line.split('Name:')[1].strip()
+                    voices.append(voice_name)
+            
+            if voices:
+                # Cache voices
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump({'timestamp': time.time(), 'voices': voices}, f)
+                return voices
     except Exception as e:
-        print(f"[TTSS] Error getting edge-tts voices: {e}")
-        return [
-            "en-US-AriaNeural", "en-US-GuyNeural", "en-US-JennyNeural",
-            "en-GB-SoniaNeural", "en-AU-NatashaNeural",
-            "vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural",
-            "ja-JP-NanamiNeural", "ko-KR-SunHiNeural",
-            "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural",
+        print(f"[TTSS] Error getting edge-tts voices via CLI: {e}")
+    
+    # Fallback to common voices
+    return [
+        "en-US-AriaNeural", "en-US-GuyNeural", "en-US-JennyNeural",
+        "en-GB-SoniaNeural", "en-AU-NatashaNeural",
+        "vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural",
+        "ja-JP-NanamiNeural", "ko-KR-SunHiNeural",
+        "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural",
         ]
 
 def get_coqui_models():
@@ -244,21 +247,54 @@ class TTSSTextToSpeech:
         engine.stop()
     
     def _synth_edge_tts(self, text, output_file, voice_name, speed):
-        """Synthesize using Microsoft Edge TTS (online, free)."""
-        import asyncio
-        import edge_tts
-        
+        """Synthesize using Microsoft Edge TTS via CLI (avoids async issues)."""
         voice = voice_name if voice_name else "en-US-AriaNeural"
         rate = f"+{int((speed - 1) * 100)}%" if speed >= 1 else f"{int((speed - 1) * 100)}%"
         
-        async def synth():
-            communicate = edge_tts.Communicate(text, voice, rate=rate)
-            await communicate.save(output_file)
+        # Use edge-tts CLI to avoid asyncio conflicts with ComfyUI
+        cmd = [
+            'edge-tts',
+            '--voice', voice,
+            '--rate', rate,
+            '--text', text,
+            '--write-media', output_file
+        ]
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(synth())
-        loop.close()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                raise RuntimeError(f"edge-tts failed: {result.stderr}")
+        except FileNotFoundError:
+            # edge-tts CLI not in PATH, try Python API with thread
+            self._synth_edge_tts_threaded(text, output_file, voice, rate)
+    
+    def _synth_edge_tts_threaded(self, text, output_file, voice, rate):
+        """Fallback: Run edge-tts in a separate thread to avoid async conflicts."""
+        import asyncio
+        import edge_tts
+        
+        result_holder = {'error': None}
+        
+        def run_in_thread():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                async def synth():
+                    communicate = edge_tts.Communicate(text, voice, rate=rate)
+                    await communicate.save(output_file)
+                
+                loop.run_until_complete(synth())
+                loop.close()
+            except Exception as e:
+                result_holder['error'] = e
+        
+        thread = threading.Thread(target=run_in_thread)
+        thread.start()
+        thread.join(timeout=300)  # 5 minute timeout
+        
+        if result_holder['error']:
+            raise result_holder['error']
     
     def _synth_coqui(self, text, output_file, model_name, speed, reference_audio):
         """Synthesize using Coqui TTS (neural, local)."""
