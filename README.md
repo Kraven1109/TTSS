@@ -85,30 +85,67 @@ ComfyUI/
 
 ### Basic Text-to-Speech
 ```
-[📝 Text Input] → [🔊 Text to Speech] → [🎧 Preview Audio]
+[🔊 Text to Speech] → [🎧 Preview Audio]
+     ↳ text: "Hello world"
+     ↳ engine: edge-tts
 ```
 
-### With Voice Selection
+### With Voice Selection (Piped)
 ```
-[🎤 Voice Selector] → [🔊 Text to Speech] → [🎧 Preview Audio]
-        ↑
-  Select engine & voice
+[🎤 Voice Selector] ──┬─ voice_name ──→ [🔊 Text to Speech] → [🎧 Preview Audio]
+                      └─ engine ─────→      ↳ engine_override
 ```
 
 ### Voice Cloning (Coqui)
 ```
-[🎙️ Load Reference Audio] → [🔊 Text to Speech (coqui-tts)] → [🎧 Preview Audio]
+[🎙️ Load Reference Audio] ── reference_audio ──→ [🔊 Text to Speech] → [🎧 Preview Audio]
+                                                      ↳ engine: coqui-tts
 ```
 
 ### With ComfyUI-LLama (Image to Speech)
 ```
-[LoadImage] → [🦙 LLama Server] → [🔊 Text to Speech] → [🎧 Preview Audio]
+[LoadImage] → [🦙 LLama Server] ── text ──→ [🔊 Text to Speech] → [🎧 Preview Audio]
+                                                ↳ text_input
 ```
 
 ### SRT Subtitle to Audio
 ```
-[📄 Load SRT] → [🔊 Text to Speech] → [💾 Save Audio]
+[📄 Load SRT] ── srt_path ──→ [🔊 Text to Speech] → [💾 Save Audio]
+                                   ↳ srt_input
 ```
+
+### Combine Multiple Audio
+```
+[🔊 TTS 1] ──→ audio1 ──┐
+[🔊 TTS 2] ──→ audio2 ──┼──→ [🔗 Combine Audio] → [🎧 Preview Audio]
+[🔊 TTS 3] ──→ audio3 ──┘
+```
+
+## Node I/O Reference
+
+### TTSSTextToSpeech 🔊
+**Inputs:**
+- `text` (STRING) - Text to synthesize
+- `engine` (dropdown) - pyttsx3 / edge-tts / coqui-tts
+- `speed` (FLOAT) - 0.5 to 2.0
+- `text_input` (STRING, optional) - Piped text input
+- `voice_name` (STRING, optional) - Voice name from Voice Selector
+- `engine_override` (STRING, optional) - Engine from Voice Selector
+- `srt_input` (SRT, optional) - SRT file path
+- `reference_audio` (AUDIOPATH, optional) - For voice cloning
+
+**Outputs:**
+- `audio_path` (AUDIOPATH)
+
+### TTSSVoiceSelector 🎤
+**Inputs:**
+- `engine` (dropdown) - Select TTS engine
+- `pyttsx3_voice` / `edge_voice` / `coqui_model` (dropdowns)
+- `custom_voice` (STRING, optional)
+
+**Outputs:**
+- `voice_name` (STRING) → Connect to Text to Speech `voice_name`
+- `engine` (STRING) → Connect to Text to Speech `engine_override`
 
 ## Requirements
 

@@ -170,7 +170,8 @@ class TTSSTextToSpeech:
             "optional": {
                 "text_input": ("STRING", {"forceInput": True, "multiline": True}),
                 "srt_input": ("SRT",),
-                "voice_name": ("STRING", {"default": ""}),
+                "voice_name": ("STRING", {"forceInput": True}),
+                "engine_override": ("STRING", {"forceInput": True}),
                 "reference_audio": ("AUDIOPATH",),
             }
         }
@@ -181,30 +182,33 @@ class TTSSTextToSpeech:
     CATEGORY = "🔊 TTSS"
     
     def synthesize(self, text, engine, speed, text_input=None, srt_input=None, 
-                   voice_name="", reference_audio=None):
+                   voice_name="", engine_override=None, reference_audio=None):
         """Generate speech from text using selected engine."""
+        
+        # Use engine_override if provided (from VoiceSelector)
+        actual_engine = engine_override if engine_override else engine
         
         # Build final text
         final_text = self._build_text(text, text_input, srt_input)
         if not final_text:
             raise ValueError("[TTSS] No text provided for synthesis")
         
-        print(f"[TTSS] Engine: {engine}, Text: {final_text[:80]}...")
+        print(f"[TTSS] Engine: {actual_engine}, Text: {final_text[:80]}...")
         
         # Generate unique filename based on content
-        text_hash = hashlib.md5(f"{final_text}{engine}{voice_name}{speed}".encode()).hexdigest()[:8]
+        text_hash = hashlib.md5(f"{final_text}{actual_engine}{voice_name}{speed}".encode()).hexdigest()[:8]
         timestamp = int(time.time())
-        output_file = os.path.join(output_path, f"ttss_{engine}_{timestamp}_{text_hash}.wav")
+        output_file = os.path.join(output_path, f"ttss_{actual_engine}_{timestamp}_{text_hash}.wav")
         
         # Route to appropriate engine
-        if engine == "pyttsx3":
+        if actual_engine == "pyttsx3":
             self._synth_pyttsx3(final_text, output_file, voice_name, speed)
-        elif engine == "edge-tts":
+        elif actual_engine == "edge-tts":
             self._synth_edge_tts(final_text, output_file, voice_name, speed)
-        elif engine == "coqui-tts":
+        elif actual_engine == "coqui-tts":
             self._synth_coqui(final_text, output_file, voice_name, speed, reference_audio)
         else:
-            raise ValueError(f"[TTSS] Unknown engine: {engine}")
+            raise ValueError(f"[TTSS] Unknown engine: {actual_engine}")
         
         if not os.path.exists(output_file):
             raise RuntimeError(f"[TTSS] Failed to create audio: {output_file}")
