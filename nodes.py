@@ -162,7 +162,7 @@ def get_reference_audio_files():
 
 
 # =============================================================================
-# Node: TTSSTextToSpeech (Multi-Engine)
+# Node: TTSSTextToSpeech (Multi-Engine with integrated voice selection)
 # =============================================================================
 class TTSSTextToSpeech:
     """
@@ -174,6 +174,11 @@ class TTSSTextToSpeech:
     
     @classmethod
     def INPUT_TYPES(cls):
+        # Get voices for each engine
+        pyttsx3_voices = get_pyttsx3_voices()
+        edge_voices = get_edge_tts_voices()
+        coqui_models = get_coqui_models()
+        
         return {
             "required": {
                 "text": ("STRING", {
@@ -187,12 +192,14 @@ class TTSSTextToSpeech:
                     "max": 2.0,
                     "step": 0.1
                 }),
+                # Voice dropdowns for each engine
+                "edge_voice": (edge_voices, {"default": "en-US-AriaNeural"}),
+                "pyttsx3_voice": (pyttsx3_voices, {"default": pyttsx3_voices[0] if pyttsx3_voices else "default"}),
+                "coqui_model": (coqui_models, {"default": coqui_models[0] if coqui_models else ""}),
             },
             "optional": {
                 "text_input": ("STRING", {"forceInput": True, "multiline": True}),
                 "srt_input": ("SRT",),
-                "voice_name": ("STRING", {"forceInput": True}),
-                "engine_override": ("STRING", {"forceInput": True}),
                 "reference_audio": ("AUDIOPATH",),
             }
         }
@@ -202,34 +209,48 @@ class TTSSTextToSpeech:
     FUNCTION = "synthesize"
     CATEGORY = "🔊 TTSS"
     
-    def synthesize(self, text, engine, speed, text_input=None, srt_input=None, 
-                   voice_name="", engine_override=None, reference_audio=None):
+    def synthesize(self, text, engine, speed, 
+                   pyttsx3_voice="default", edge_voice="en-US-AriaNeural",
+                   coqui_model="tts_models/en/ljspeech/vits", reference_audio="(none)",
+                   text_input=None, srt_input=None):
         """Generate speech from text using selected engine."""
-        
-        # Use engine_override if provided (from VoiceSelector)
-        actual_engine = engine_override if engine_override else engine
         
         # Build final text
         final_text = self._build_text(text, text_input, srt_input)
         if not final_text:
             raise ValueError("[TTSS] No text provided for synthesis")
         
-        print(f"[TTSS] Engine: {actual_engine}, Text: {final_text[:80]}...")
+        # Select voice based on engine
+        if engine == "pyttsx3":
+            voice_name = pyttsx3_voice
+        elif engine == "edge-tts":
+            voice_name = edge_voice
+        elif engine == "coqui-tts":
+            voice_name = coqui_model
+        else:
+            voice_name = ""
+        
+        print(f"[TTSS] Engine: {engine}, Voice: {voice_name}, Text: {final_text[:80]}...")
         
         # Generate unique filename based on content
-        text_hash = hashlib.md5(f"{final_text}{actual_engine}{voice_name}{speed}".encode()).hexdigest()[:8]
+        text_hash = hashlib.md5(f"{final_text}{engine}{voice_name}{speed}".encode()).hexdigest()[:8]
         timestamp = int(time.time())
-        output_file = os.path.join(output_path, f"ttss_{actual_engine}_{timestamp}_{text_hash}.wav")
+        output_file = os.path.join(output_path, f"ttss_{engine}_{timestamp}_{text_hash}.wav")
+        
+        # Handle reference audio for Coqui
+        ref_audio_path = None
+        if reference_audio and reference_audio != "(none)":
+            ref_audio_path = os.path.join(tts_reference_path, reference_audio)
         
         # Route to appropriate engine
-        if actual_engine == "pyttsx3":
+        if engine == "pyttsx3":
             self._synth_pyttsx3(final_text, output_file, voice_name, speed)
-        elif actual_engine == "edge-tts":
+        elif engine == "edge-tts":
             self._synth_edge_tts(final_text, output_file, voice_name, speed)
-        elif actual_engine == "coqui-tts":
-            self._synth_coqui(final_text, output_file, voice_name, speed, reference_audio)
+        elif engine == "coqui-tts":
+            self._synth_coqui(final_text, output_file, voice_name, speed, ref_audio_path)
         else:
-            raise ValueError(f"[TTSS] Unknown engine: {actual_engine}")
+            raise ValueError(f"[TTSS] Unknown engine: {engine}")
         
         if not os.path.exists(output_file):
             raise RuntimeError(f"[TTSS] Failed to create audio: {output_file}")
@@ -377,53 +398,6 @@ class TTSSTextToSpeech:
             return " ".join(texts)
         except:
             return ""
-
-
-# =============================================================================
-# Node: TTSSVoiceSelector
-# =============================================================================
-class TTSSVoiceSelector:
-    """
-    Select a voice for TTS synthesis.
-    Dynamically loads available voices based on engine.
-    """
-    
-    @classmethod
-    def INPUT_TYPES(cls):
-        pyttsx3_voices = get_pyttsx3_voices()
-        edge_voices = get_edge_tts_voices()
-        
-        return {
-            "required": {
-                "engine": (TTS_ENGINES, {"default": "edge-tts"}),
-            },
-            "optional": {
-                "pyttsx3_voice": (pyttsx3_voices, {"default": pyttsx3_voices[0] if pyttsx3_voices else "default"}),
-                "edge_voice": (edge_voices, {"default": "en-US-AriaNeural"}),
-                "coqui_model": (get_coqui_models(), {"default": "tts_models/en/ljspeech/vits"}),
-                "custom_voice": ("STRING", {"default": ""}),
-            }
-        }
-    
-    RETURN_TYPES = ("STRING", "STRING",)
-    RETURN_NAMES = ("voice_name", "engine",)
-    FUNCTION = "select_voice"
-    CATEGORY = "🔊 TTSS"
-    
-    def select_voice(self, engine, pyttsx3_voice="default", edge_voice="en-US-AriaNeural", 
-                     coqui_model="", custom_voice=""):
-        """Return selected voice based on engine."""
-        if custom_voice:
-            return (custom_voice, engine)
-        
-        if engine == "pyttsx3":
-            return (pyttsx3_voice, engine)
-        elif engine == "edge-tts":
-            return (edge_voice, engine)
-        elif engine == "coqui-tts":
-            return (coqui_model, engine)
-        
-        return ("default", engine)
 
 
 # =============================================================================
