@@ -1,0 +1,23 @@
+# TTSS - Text-to-Speech for ComfyUI
+# Multi-engine TTS with voice cloning support
+
+# === CORE (required) ===
+pyttsx3>=2.90       # Offline TTS using system voices
+pydub>=0.25.1       # Audio processing and format conversion
+srt>=3.5.0          # SRT subtitle parsing
+
+# === EDGE-TTS (recommended - online, high quality, free) ===
+edge-tts>=6.1.0     # Microsoft Edge TTS API
+
+# === COQUI TTS (optional - neural TTS, requires GPU) ===
+# Uncomment for advanced voice cloning with neural models
+# TTS>=0.22.0         # Coqui TTS library
+# torch>=2.0.0        # PyTorch for neural TTS
+
+# Audio processing (for combine/save audio features)
+# pydub requires ffmpeg - install via: conda install ffmpeg or apt install ffmpeg
+scipy>=1.11.0
+soundfile>=0.12.0
+
+# Utilities
+tqdm>=4.64.0

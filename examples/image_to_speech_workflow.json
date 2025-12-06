@@ -1,0 +1,165 @@
+{
+  "last_node_id": 7,
+  "last_link_id": 6,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [100, 200],
+      "size": {"0": 315, "1": 314},
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [1],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": ["example.png", "image"]
+    },
+    {
+      "id": 2,
+      "type": "TTSSImageToText",
+      "pos": [500, 200],
+      "size": {"0": 400, "1": 200},
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "links": [2],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TTSSImageToText"
+      },
+      "widgets_values": [
+        "Describe this image in detail for text-to-speech narration.",
+        "http://localhost:8080/v1/chat/completions",
+        512,
+        0.7,
+        "You are a helpful assistant that describes images for audio narration."
+      ]
+    },
+    {
+      "id": 3,
+      "type": "TTSSLoadAudio",
+      "pos": [500, 450],
+      "size": {"0": 315, "1": 82},
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "audio_path",
+          "type": "AUDIOPATH",
+          "links": [3],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TTSSLoadAudio"
+      },
+      "widgets_values": ["reference_voice.wav"]
+    },
+    {
+      "id": 4,
+      "type": "TTSSTextToSpeech",
+      "pos": [950, 200],
+      "size": {"0": 400, "1": 280},
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 2,
+          "widget": {
+            "name": "text"
+          }
+        },
+        {
+          "name": "reference_audio",
+          "type": "AUDIOPATH",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "audio_path",
+          "type": "AUDIOPATH",
+          "links": [4],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TTSSTextToSpeech"
+      },
+      "widgets_values": [
+        "",
+        "en",
+        0.65,
+        1.0,
+        0.8,
+        50
+      ]
+    },
+    {
+      "id": 5,
+      "type": "TTSSPreviewAudio",
+      "pos": [1400, 200],
+      "size": {"0": 315, "1": 150},
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIOPATH",
+          "link": 4
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TTSSPreviewAudio"
+      }
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "IMAGE"],
+    [2, 2, 0, 4, 0, "STRING"],
+    [3, 3, 0, 4, 1, "AUDIOPATH"],
+    [4, 4, 0, 5, 0, "AUDIOPATH"]
+  ],
+  "groups": [
+    {
+      "title": "TTSS - Image to Speech Workflow",
+      "bounding": [50, 100, 1700, 500],
+      "color": "#3f789e"
+    }
+  ],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
