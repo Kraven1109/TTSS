@@ -274,17 +274,21 @@ class TTSSTextToSpeech:
     def _synth_edge_tts(self, text, output_file, voice_name, speed):
         """Synthesize using Microsoft Edge TTS via CLI (avoids async issues)."""
         voice = voice_name if voice_name else "en-US-AriaNeural"
-        rate = f"+{int((speed - 1) * 100)}%" if speed >= 1 else f"{int((speed - 1) * 100)}%"
         
         # Use edge-tts CLI to avoid asyncio conflicts with ComfyUI
         edge_tts_cmd = _get_edge_tts_cli()
         cmd = [
             edge_tts_cmd,
             '--voice', voice,
-            '--rate', rate,
             '--text', text,
             '--write-media', output_file
         ]
+        
+        # Only add --rate if speed is not 1.0
+        if speed != 1.0:
+            rate_percent = int((speed - 1) * 100)
+            rate = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
+            cmd.extend(['--rate', rate])
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -292,12 +296,19 @@ class TTSSTextToSpeech:
                 raise RuntimeError(f"edge-tts failed: {result.stderr}")
         except FileNotFoundError:
             # edge-tts CLI not in PATH, try Python API with thread
-            self._synth_edge_tts_threaded(text, output_file, voice, rate)
+            self._synth_edge_tts_threaded(text, output_file, voice, speed)
     
-    def _synth_edge_tts_threaded(self, text, output_file, voice, rate):
+    def _synth_edge_tts_threaded(self, text, output_file, voice, speed):
         """Fallback: Run edge-tts in a separate thread to avoid async conflicts."""
         import asyncio
         import edge_tts
+        
+        # Calculate rate string for edge_tts API
+        if speed != 1.0:
+            rate_percent = int((speed - 1) * 100)
+            rate = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
+        else:
+            rate = "+0%"
         
         result_holder = {'error': None}
         
