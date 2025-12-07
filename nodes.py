@@ -50,7 +50,36 @@ for path in [output_path, tts_models_path, tts_reference_path, tts_xtts_path, tt
 # =============================================================================
 # TTS Engine Registry
 # =============================================================================
-TTS_ENGINES = ["pyttsx3", "edge-tts", "xtts-v2"]
+TTS_ENGINES = ["pyttsx3", "edge-tts", "kokoro", "orpheus", "xtts-v2"]
+
+# Kokoro voices (built-in, no reference audio needed)
+KOKORO_VOICES = [
+    # American English
+    "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore", "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
+    "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa",
+    # British English  
+    "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+]
+
+# Kokoro language codes
+KOKORO_LANGS = {
+    "a": "American English",
+    "b": "British English", 
+    "e": "Spanish",
+    "f": "French",
+    "h": "Hindi",
+    "i": "Italian",
+    "j": "Japanese",
+    "p": "Brazilian Portuguese",
+    "z": "Mandarin Chinese",
+}
+
+# Orpheus voices (built-in)
+ORPHEUS_VOICES = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
+
+# Orpheus emotion tags
+ORPHEUS_EMOTIONS = ["<laugh>", "<chuckle>", "<sigh>", "<cough>", "<sniffle>", "<groan>", "<yawn>", "<gasp>"]
 
 def _get_edge_tts_cli():
     """Find edge-tts CLI executable path."""
@@ -154,6 +183,18 @@ def get_xtts_models():
     ]
     return models + hf_models if models else hf_models
 
+def get_kokoro_voices():
+    """Get available Kokoro voices."""
+    return KOKORO_VOICES
+
+def get_kokoro_langs():
+    """Get Kokoro language codes."""
+    return list(KOKORO_LANGS.keys())
+
+def get_orpheus_voices():
+    """Get available Orpheus voices."""
+    return ORPHEUS_VOICES
+
 def get_reference_audio_files():
     """Get reference audio files for voice cloning."""
     files = ["(none)"]
@@ -171,8 +212,10 @@ class TTSSTextToSpeech:
     """
     Text-to-Speech synthesis with multiple engine support.
     - pyttsx3: Offline, uses system voices (SAPI/NSSpeech/espeak)
-    - edge-tts: Microsoft Edge TTS (online, high quality, free)
-    - xtts-v2: Neural TTS with voice cloning via Auralis (GPU, Python 3.10+)
+    - edge-tts: Microsoft Edge TTS (online, high quality, free, 550+ voices)
+    - kokoro: Lightweight neural TTS (82M params, fast, multi-language)
+    - orpheus: SOTA LLM-based TTS with emotion tags (3B params, GPU)
+    - xtts-v2: Neural TTS with voice cloning via Auralis (GPU, Python 3.10-3.12)
     """
     
     @classmethod
@@ -181,6 +224,8 @@ class TTSSTextToSpeech:
         pyttsx3_voices = get_pyttsx3_voices()
         edge_voices = get_edge_tts_voices()
         xtts_models = get_xtts_models()
+        kokoro_voices = get_kokoro_voices()
+        orpheus_voices = get_orpheus_voices()
         
         return {
             "required": {
@@ -198,6 +243,9 @@ class TTSSTextToSpeech:
                 # Voice dropdowns for each engine
                 "edge_voice": (edge_voices, {"default": "en-US-AriaNeural"}),
                 "pyttsx3_voice": (pyttsx3_voices, {"default": pyttsx3_voices[0] if pyttsx3_voices else "default"}),
+                "kokoro_voice": (kokoro_voices, {"default": "af_heart"}),
+                "kokoro_lang": (list(KOKORO_LANGS.keys()), {"default": "a"}),
+                "orpheus_voice": (orpheus_voices, {"default": "tara"}),
                 "xtts_model": (xtts_models, {"default": xtts_models[0] if xtts_models else "AstraMindAI/xttsv2"}),
             },
             "optional": {
@@ -214,6 +262,8 @@ class TTSSTextToSpeech:
     
     def synthesize(self, text, engine, speed, 
                    pyttsx3_voice="default", edge_voice="en-US-AriaNeural",
+                   kokoro_voice="af_heart", kokoro_lang="a",
+                   orpheus_voice="tara",
                    xtts_model="AstraMindAI/xttsv2", reference_audio="(none)",
                    text_input=None, srt_input=None):
         """Generate speech from text using selected engine."""
@@ -228,6 +278,10 @@ class TTSSTextToSpeech:
             voice_name = pyttsx3_voice
         elif engine == "edge-tts":
             voice_name = edge_voice
+        elif engine == "kokoro":
+            voice_name = kokoro_voice
+        elif engine == "orpheus":
+            voice_name = orpheus_voice
         elif engine == "xtts-v2":
             voice_name = xtts_model
         else:
@@ -253,6 +307,10 @@ class TTSSTextToSpeech:
             self._synth_pyttsx3(final_text, output_file, voice_name, speed)
         elif engine == "edge-tts":
             self._synth_edge_tts(final_text, output_file, voice_name, speed)
+        elif engine == "kokoro":
+            self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed)
+        elif engine == "orpheus":
+            self._synth_orpheus(final_text, output_file, voice_name)
         elif engine == "xtts-v2":
             self._synth_xtts(final_text, output_file, voice_name, ref_audio_path)
         else:
@@ -407,6 +465,74 @@ class TTSSTextToSpeech:
         # Generate speech
         output = tts.generate_speech(request)
         output.save(output_file)
+    
+    def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
+        """Synthesize using Kokoro TTS (lightweight 82M neural TTS)."""
+        try:
+            from kokoro import KPipeline
+            import soundfile as sf
+        except ImportError:
+            raise ImportError(
+                "[TTSS] Kokoro not installed. Run: pip install kokoro soundfile\n"
+                "Also install espeak-ng for phoneme support:\n"
+                "  Windows: Download from https://github.com/espeak-ng/espeak-ng/releases\n"
+                "  Linux: apt install espeak-ng\n"
+                "  macOS: brew install espeak-ng"
+            )
+        
+        # Initialize Kokoro pipeline with language code
+        pipeline = KPipeline(lang_code=lang_code)
+        
+        # Generate speech
+        generator = pipeline(text, voice=voice, speed=speed)
+        
+        # Collect all audio chunks
+        audio_chunks = []
+        for i, (gs, ps, audio) in enumerate(generator):
+            audio_chunks.append(audio)
+        
+        if audio_chunks:
+            # Concatenate all chunks
+            import numpy as np
+            full_audio = np.concatenate(audio_chunks)
+            sf.write(output_file, full_audio, 24000)
+        else:
+            raise RuntimeError("[TTSS] Kokoro generated no audio")
+    
+    def _synth_orpheus(self, text, output_file, voice):
+        """Synthesize using Orpheus TTS (SOTA LLM-based TTS with emotions)."""
+        try:
+            from orpheus_tts import OrpheusModel
+        except ImportError:
+            raise ImportError(
+                "[TTSS] Orpheus TTS not installed. Run:\n"
+                "  pip install orpheus-speech\n"
+                "  pip install vllm==0.7.3  # Recommended stable version\n\n"
+                "Note: Orpheus requires GPU with vLLM for fast inference."
+            )
+        
+        import wave
+        
+        # Initialize Orpheus model
+        model = OrpheusModel(
+            model_name="canopylabs/orpheus-tts-0.1-finetune-prod",
+            max_model_len=2048
+        )
+        
+        # Generate speech with streaming
+        syn_tokens = model.generate_speech(
+            prompt=text,
+            voice=voice,
+        )
+        
+        # Write audio chunks to WAV file
+        with wave.open(output_file, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            
+            for audio_chunk in syn_tokens:
+                wf.writeframes(audio_chunk)
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""

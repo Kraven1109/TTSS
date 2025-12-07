@@ -6,11 +6,14 @@ Multi-engine Text-to-Speech nodes for ComfyUI with voice cloning support.
 
 - **🎤 Multiple TTS Engines**:
   - `pyttsx3` - Offline, uses system voices (Windows SAPI, macOS, Linux espeak)
-  - `edge-tts` - Microsoft Edge TTS (online, high quality, free, 400+ voices)
-  - `xtts-v2` - Neural TTS with voice cloning via Auralis (GPU, Python 3.10+)
+  - `edge-tts` - Microsoft Edge TTS (online, high quality, free, 550+ voices)
+  - `kokoro` - Lightweight neural TTS (82M params, fast, multi-language, Apache 2.0)
+  - `orpheus` - SOTA LLM-based TTS with emotion tags (3B params, GPU)
+  - `xtts-v2` - Neural TTS with voice cloning via Auralis (GPU, Python 3.10-3.12)
 
 - **🎙️ Voice Cloning**: Clone any voice using reference audio (XTTS-v2)
-- **🌍 Multi-language**: 100+ languages supported via edge-tts
+- **🌍 Multi-language**: 100+ languages supported
+- **😊 Emotion Tags**: Add `<laugh>`, `<sigh>`, `<gasp>` with Orpheus
 - **📝 SRT Support**: Read subtitles directly for TTS
 - **🔗 Audio Combining**: Merge multiple audio files with crossfade
 
@@ -33,7 +36,7 @@ pip install -r requirements.txt
 
 | Node | Icon | Description |
 |------|------|-------------|
-| `TTSSTextToSpeech` | 🔊 | Main TTS node - supports all 3 engines with built-in voice selection |
+| `TTSSTextToSpeech` | 🔊 | Main TTS node - supports 5 engines with built-in voice selection |
 | `TTSSLoadReferenceAudio` | 🎙️ | Load reference audio for voice cloning |
 | `TTSSLoadAudio` | 📂 | Load audio from input directory |
 | `TTSSLoadSRT` | 📄 | Load SRT subtitle file |
@@ -48,7 +51,7 @@ pip install -r requirements.txt
 - ✅ Uses system voices (Windows SAPI, macOS NSSpeechSynthesizer)
 - ⚠️ Limited voice quality compared to neural TTS
 
-### 2. edge-tts (Recommended)
+### 2. edge-tts (Recommended for beginners)
 - ✅ High quality Microsoft neural voices
 - ✅ 550+ voices in 100+ languages
 - ✅ Free, no API key required
@@ -59,20 +62,52 @@ pip install -r requirements.txt
 - `en-US-GuyNeural` - Male, natural
 - `vi-VN-HoaiMyNeural` - Vietnamese female
 - `ja-JP-NanamiNeural` - Japanese female
-- `zh-CN-XiaoxiaoNeural` - Chinese female
 
-### 3. xtts-v2 (Neural + Voice Cloning via Auralis)
-- ✅ Highest quality neural TTS with voice cloning
-- ✅ Works with Python 3.10+ (ComfyUI compatible!)
-- ✅ Clone any voice with just 6 seconds of audio
+### 3. kokoro (Lightweight Neural TTS) 🆕
+- ✅ **82M params** - Fast, runs on CPU
+- ✅ **Apache 2.0** - Commercial friendly
+- ✅ **Multi-language** - EN, ES, FR, JA, ZH, KO, HI, IT, PT
+- ✅ **28+ built-in voices** - No reference audio needed
+- ⚠️ Requires espeak-ng installed
+
+**Installation:**
+```bash
+pip install kokoro soundfile
+# Also install espeak-ng from: https://github.com/espeak-ng/espeak-ng/releases
+```
+
+**Voices:** `af_heart`, `af_bella`, `am_adam`, `bf_emma`, `bm_george`...
+
+### 4. orpheus (SOTA LLM-based TTS) 🆕
+- ✅ **Human-like speech** - Superior to closed-source models
+- ✅ **Emotion tags** - `<laugh>`, `<sigh>`, `<gasp>`, `<chuckle>`
+- ✅ **Zero-shot voice cloning**
+- ✅ **~200ms latency** - Real-time streaming
+- ⚠️ Requires **GPU** with vLLM
+
+**Installation:**
+```bash
+pip install orpheus-speech
+pip install vllm==0.7.3  # Stable version
+```
+
+**Voices:** `tara`, `leah`, `jess`, `leo`, `dan`, `mia`, `zac`, `zoe`
+
+**Emotion tags example:**
+```
+I can't believe it! <laugh> This is amazing <gasp>
+```
+
+### 5. xtts-v2 (Voice Cloning via Auralis)
+- ✅ Clone any voice with 6 seconds of audio
 - ✅ 17 languages supported
-- ⚠️ Requires GPU and `pip install auralis`
-- ⚠️ Requires reference audio for synthesis
+- ⚠️ Requires GPU and Python 3.10-3.12
+- ⚠️ Requires reference audio
 
-**Why Auralis instead of Coqui TTS?**
-- Coqui TTS requires Python <3.12, but ComfyUI uses Python 3.12/3.13
-- Auralis wraps XTTS-v2 and works with Python 3.10+
-- Same XTTS-v2 quality, modern Python support!
+**Installation:**
+```bash
+pip install auralis torch
+```
 
 ## Directory Structure
 
@@ -127,11 +162,14 @@ ComfyUI/
 ### TTSSTextToSpeech 🔊
 **Inputs:**
 - `text` (STRING) - Text to synthesize
-- `engine` (dropdown) - pyttsx3 / edge-tts / xtts-v2
-- `speed` (FLOAT) - 0.5 to 2.0 (pyttsx3 & edge-tts only)
-- `edge_voice` (dropdown) - Select from 550+ Microsoft Edge voices
-- `pyttsx3_voice` (dropdown) - Select system voice
-- `xtts_model` (dropdown) - Select XTTS-v2 model
+- `engine` (dropdown) - pyttsx3 / edge-tts / kokoro / orpheus / xtts-v2
+- `speed` (FLOAT) - 0.5 to 2.0
+- `edge_voice` (dropdown) - 550+ Microsoft Edge voices
+- `pyttsx3_voice` (dropdown) - System voices
+- `kokoro_voice` (dropdown) - Kokoro built-in voices (28+)
+- `kokoro_lang` (dropdown) - Language code (a=EN, j=JA, z=ZH...)
+- `orpheus_voice` (dropdown) - Orpheus voices (tara, leo, mia...)
+- `xtts_model` (dropdown) - XTTS-v2 model
 - `text_input` (STRING, optional) - Piped text input
 - `srt_input` (SRT, optional) - SRT file path
 - `reference_audio` (AUDIOPATH, optional) - For XTTS-v2 voice cloning
@@ -152,14 +190,25 @@ pydub>=0.25.1
 pyttsx3>=2.90
 pydub>=0.25.1
 edge-tts>=6.1.0
+soundfile>=0.12.0
 ```
 
-### Full (with XTTS-v2 voice cloning via Auralis)
+### With Kokoro (lightweight neural TTS)
 ```
-pyttsx3>=2.90
-pydub>=0.25.1
-edge-tts>=6.1.0
-auralis>=0.2.8    # XTTS-v2 for Python 3.10+ (works with ComfyUI!)
+kokoro>=0.9.4
+soundfile>=0.12.0
+# Also install espeak-ng system package
+```
+
+### With Orpheus (SOTA LLM TTS, requires GPU)
+```
+orpheus-speech
+vllm==0.7.3
+```
+
+### With XTTS-v2 (voice cloning, Python 3.10-3.12)
+```
+auralis>=0.2.8
 torch>=2.0.0
 ```
 
@@ -167,6 +216,16 @@ torch>=2.0.0
 - Windows: `conda install ffmpeg` or download from ffmpeg.org
 - Linux: `apt install ffmpeg`
 - macOS: `brew install ffmpeg`
+
+## Engine Comparison
+
+| Engine | Quality | Speed | GPU | Voice Clone | Multi-lang | Python |
+|--------|---------|-------|-----|-------------|------------|--------|
+| pyttsx3 | ⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | Limited | All |
+| edge-tts | ⭐⭐⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | 100+ | All |
+| kokoro | ⭐⭐⭐⭐ | 🚀🚀 | Optional | ❌ | 9 | 3.9+ |
+| orpheus | ⭐⭐⭐⭐⭐ | 🚀 | ✅ Required | ✅ | 7 | 3.9+ |
+| xtts-v2 | ⭐⭐⭐⭐ | 🚀 | ✅ Required | ✅ | 17 | 3.10-3.12 |
 
 ## Related Projects
 
@@ -178,7 +237,8 @@ MIT License
 
 ## Acknowledgements
 
-- [Auralis](https://github.com/astramind-ai/Auralis) - XTTS-v2 wrapper for Python 3.10+
+- [Kokoro](https://github.com/hexgrad/kokoro) - Lightweight 82M neural TTS
+- [Orpheus TTS](https://github.com/canopyai/Orpheus-TTS) - SOTA LLM-based TTS
+- [Auralis](https://github.com/astramind-ai/Auralis) - XTTS-v2 wrapper
 - [edge-tts](https://github.com/rany2/edge-tts) - Microsoft Edge TTS wrapper
-- [XTTS-v2](https://huggingface.co/coqui/XTTS-v2) - Voice cloning neural TTS
 - [pyttsx3](https://github.com/nateshmbhat/pyttsx3) - Offline TTS

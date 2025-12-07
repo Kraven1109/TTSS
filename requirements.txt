@@ -5,20 +5,31 @@
 pyttsx3>=2.90       # Offline TTS using system voices
 pydub>=0.25.1       # Audio processing and format conversion
 srt>=3.5.0          # SRT subtitle parsing
+soundfile>=0.12.0   # Audio file I/O
 
 # === EDGE-TTS (recommended - online, high quality, free) ===
-edge-tts>=6.1.0     # Microsoft Edge TTS API
+edge-tts>=6.1.0     # Microsoft Edge TTS API (550+ voices)
+
+# === KOKORO (optional - lightweight neural TTS, 82M params) ===
+# Fast, multi-language, works on CPU, Apache 2.0 license
+# Requires espeak-ng: https://github.com/espeak-ng/espeak-ng/releases
+# kokoro>=0.9.4       # Kokoro TTS
+# misaki[en]          # English G2P (add [ja] for Japanese, [zh] for Chinese)
+
+# === ORPHEUS (optional - SOTA LLM-based TTS, 3B params) ===
+# Human-like speech with emotion tags, requires GPU
+# orpheus-speech      # Orpheus TTS (uses vLLM)
+# vllm==0.7.3         # Recommended stable version for Orpheus
 
 # === XTTS-v2 / Auralis (optional - neural TTS with voice cloning) ===
-# Works with Python 3.10+ (unlike Coqui TTS which requires Python <3.12)
-# Uncomment for advanced voice cloning with XTTS-v2 neural models
-# auralis>=0.2.8      # Auralis - XTTS-v2 wrapper for Python 3.10+
+# Works with Python 3.10-3.12 (Coqui TTS requires Python <3.12)
+# auralis>=0.2.8      # Auralis - XTTS-v2 wrapper
 # torch>=2.0.0        # PyTorch for neural TTS
 
-# Audio processing (for combine/save audio features)
-# pydub requires ffmpeg - install via: conda install ffmpeg or apt install ffmpeg
+# Audio processing (pydub requires ffmpeg)
+# Install ffmpeg via: conda install ffmpeg or apt install ffmpeg
 scipy>=1.11.0
-soundfile>=0.12.0
 
 # Utilities
 tqdm>=4.64.0
+numpy>=1.24.0
