@@ -467,37 +467,69 @@ class TTSSTextToSpeech:
         output.save(output_file)
     
     def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
-        """Synthesize using Kokoro TTS (lightweight 82M neural TTS)."""
+        """Synthesize using Kokoro TTS via ONNX Runtime (lightweight 82M neural TTS).
+        
+        Uses kokoro-onnx package which works on Python 3.10-3.13.
+        First run will download ~300MB model files.
+        """
         try:
-            from kokoro import KPipeline
+            from kokoro_onnx import Kokoro
             import soundfile as sf
         except ImportError:
             raise ImportError(
-                "[TTSS] Kokoro not installed. Run: pip install kokoro soundfile\n"
-                "Also install espeak-ng for phoneme support:\n"
-                "  Windows: Download from https://github.com/espeak-ng/espeak-ng/releases\n"
-                "  Linux: apt install espeak-ng\n"
-                "  macOS: brew install espeak-ng"
+                "[TTSS] kokoro-onnx not installed. Run: pip install kokoro-onnx soundfile\n"
+                "Note: First run will download ~300MB model (or ~80MB quantized)."
             )
         
-        # Initialize Kokoro pipeline with language code
-        pipeline = KPipeline(lang_code=lang_code)
+        # Model paths in TTS models directory
+        model_path = os.path.join(tts_models_path, "kokoro-v1.0.onnx")
+        voices_path = os.path.join(tts_models_path, "voices-v1.0.bin")
+        
+        # Auto-download models if not present
+        if not os.path.exists(model_path) or not os.path.exists(voices_path):
+            print("[TTSS] Downloading Kokoro ONNX models (~300MB)...")
+            self._download_kokoro_models(model_path, voices_path)
+        
+        # Map lang_code to kokoro-onnx lang format
+        lang_map = {
+            "a": "en-us",  # American English
+            "b": "en-gb",  # British English
+            "e": "es",     # Spanish
+            "f": "fr-fr",  # French
+            "h": "hi",     # Hindi
+            "i": "it",     # Italian
+            "j": "ja",     # Japanese
+            "p": "pt-br",  # Brazilian Portuguese
+            "z": "zh",     # Mandarin Chinese
+        }
+        lang = lang_map.get(lang_code, "en-us")
+        
+        # Initialize Kokoro with ONNX model
+        kokoro = Kokoro(model_path, voices_path)
         
         # Generate speech
-        generator = pipeline(text, voice=voice, speed=speed)
+        samples, sample_rate = kokoro.create(text, voice=voice, speed=speed, lang=lang)
         
-        # Collect all audio chunks
-        audio_chunks = []
-        for i, (gs, ps, audio) in enumerate(generator):
-            audio_chunks.append(audio)
+        # Save audio
+        sf.write(output_file, samples, sample_rate)
+    
+    def _download_kokoro_models(self, model_path, voices_path):
+        """Download Kokoro ONNX model files."""
+        import urllib.request
         
-        if audio_chunks:
-            # Concatenate all chunks
-            import numpy as np
-            full_audio = np.concatenate(audio_chunks)
-            sf.write(output_file, full_audio, 24000)
-        else:
-            raise RuntimeError("[TTSS] Kokoro generated no audio")
+        base_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+        
+        # Download model file
+        if not os.path.exists(model_path):
+            print(f"[TTSS] Downloading kokoro-v1.0.onnx...")
+            urllib.request.urlretrieve(f"{base_url}/kokoro-v1.0.onnx", model_path)
+        
+        # Download voices file
+        if not os.path.exists(voices_path):
+            print(f"[TTSS] Downloading voices-v1.0.bin...")
+            urllib.request.urlretrieve(f"{base_url}/voices-v1.0.bin", voices_path)
+        
+        print("[TTSS] Kokoro models downloaded successfully!")
     
     def _synth_orpheus(self, text, output_file, voice):
         """Synthesize using Orpheus TTS via llama.cpp (SOTA LLM-based TTS with emotions).

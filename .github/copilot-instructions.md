@@ -60,15 +60,14 @@ def synthesize(self, text, engine, speed,
         self._synth_xtts(text, output_file, xtts_model, reference_audio)
 ```
 
-### Kokoro TTS (82M params, fast)
+### Kokoro TTS (82M params, ONNX Runtime, Python 3.10-3.13)
 ```python
 def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
-    from kokoro import KPipeline
+    from kokoro_onnx import Kokoro
     import soundfile as sf
-    pipeline = KPipeline(lang_code=lang_code)
-    generator = pipeline(text, voice=voice, speed=speed)
-    for i, (gs, ps, audio) in enumerate(generator):
-        sf.write(output_file, audio, 24000)
+    kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
+    samples, sample_rate = kokoro.create(text, voice=voice, speed=speed, lang="en-us")
+    sf.write(output_file, samples, sample_rate)
 ```
 
 ### Orpheus TTS (SOTA LLM-based with emotion tags, llama.cpp backend)
@@ -162,7 +161,7 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 
 **Optional:**
 - edge-tts (Microsoft TTS, 550+ voices)
-- kokoro (lightweight neural TTS, 82M params)
+- kokoro-onnx (lightweight neural TTS, 82M params, Python 3.10-3.13)
 - orpheus-cpp + llama-cpp-python (SOTA LLM TTS, llama.cpp backend, works on Windows!)
 - auralis (XTTS-v2 voice cloning, Python 3.10-3.12)
 
@@ -172,8 +171,8 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 |--------|--------|---------|-------|-----|-------------|--------|
 | pyttsx3 | - | ⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | All |
 | edge-tts | Cloud | ⭐⭐⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | All |
-| kokoro | 82M | ⭐⭐⭐⭐ | 🚀🚀 | Optional | ❌ | 3.9+ |
-| orpheus | 3B | ⭐⭐⭐⭐⭐ | 🚀 | Optional | ✅ | 3.9+ |
+| kokoro | 82M | ⭐⭐⭐⭐ | 🚀🚀 | Optional | ❌ | 3.10-3.13 |
+| orpheus | 3B | ⭐⭐⭐⭐⭐ | 🚀 | Optional | ✅ | 3.10-3.12 |
 | xtts-v2 | ~1B | ⭐⭐⭐⭐ | 🚀 | Required | ✅ | 3.10-3.12 |
 
 ## Why Auralis instead of Coqui TTS?

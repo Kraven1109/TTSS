@@ -68,15 +68,15 @@ pip install -r requirements.txt
 - ✅ **Apache 2.0** - Commercial friendly
 - ✅ **Multi-language** - EN, ES, FR, JA, ZH, KO, HI, IT, PT
 - ✅ **28+ built-in voices** - No reference audio needed
-- ⚠️ Requires espeak-ng installed
+- ✅ **Python 3.10-3.13** - via ONNX Runtime
+- ⚠️ First run downloads ~300MB model
 
 **Installation:**
 ```bash
-pip install kokoro soundfile
-# Also install espeak-ng from: https://github.com/espeak-ng/espeak-ng/releases
+pip install kokoro-onnx soundfile
 ```
 
-**Voices:** `af_heart`, `af_bella`, `am_adam`, `bf_emma`, `bm_george`...
+**Voices:** `af_heart`, `af_bella`, `am_adam`, `bf_emma`, `bm_george`, `af_sarah`...
 
 ### 4. orpheus (SOTA LLM-based TTS) 🆕
 - ✅ **Human-like speech** - Superior to closed-source models

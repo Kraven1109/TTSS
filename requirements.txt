@@ -12,9 +12,9 @@ edge-tts>=6.1.0     # Microsoft Edge TTS API (550+ voices)
 
 # === KOKORO (optional - lightweight neural TTS, 82M params) ===
 # Fast, multi-language, works on CPU, Apache 2.0 license
-# Requires espeak-ng: https://github.com/espeak-ng/espeak-ng/releases
-# kokoro>=0.9.4       # Kokoro TTS
-# misaki[en]          # English G2P (add [ja] for Japanese, [zh] for Chinese)
+# Python 3.10-3.13 compatible via ONNX Runtime
+kokoro-onnx>=0.4.9    # Kokoro TTS with ONNX Runtime (auto-downloads model)
+# First run downloads ~300MB model files to models/tts/
 
 # === ORPHEUS (optional - SOTA LLM-based TTS, 3B params) ===
 # Human-like speech with emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>
