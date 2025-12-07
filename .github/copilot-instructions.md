@@ -71,13 +71,20 @@ def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
         sf.write(output_file, audio, 24000)
 ```
 
-### Orpheus TTS (SOTA LLM-based with emotion tags)
+### Orpheus TTS (SOTA LLM-based with emotion tags, llama.cpp backend)
 ```python
 def _synth_orpheus(self, text, output_file, voice):
-    from orpheus_tts import OrpheusModel
-    model = OrpheusModel(model_name="canopylabs/orpheus-tts-0.1-finetune-prod")
-    syn_tokens = model.generate_speech(prompt=text, voice=voice)
-    # Supports emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>
+    from orpheus_cpp import OrpheusCpp
+    import numpy as np
+    from scipy.io.wavfile import write as wav_write
+    
+    orpheus = OrpheusCpp(verbose=False, lang="en")
+    buffer = []
+    for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
+        buffer.append(chunk)
+    audio = np.concatenate(buffer, axis=1)
+    wav_write(output_file, 24000, np.concatenate(audio))
+    # Supports emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>, <cough>, <sniffle>, <groan>, <yawn>
 ```
 
 ### XTTS-v2 via Auralis (Python 3.10-3.12)
@@ -156,7 +163,7 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 **Optional:**
 - edge-tts (Microsoft TTS, 550+ voices)
 - kokoro (lightweight neural TTS, 82M params)
-- orpheus-speech + vllm (SOTA LLM TTS, requires GPU)
+- orpheus-cpp + llama-cpp-python (SOTA LLM TTS, llama.cpp backend, works on Windows!)
 - auralis (XTTS-v2 voice cloning, Python 3.10-3.12)
 
 ## Engine Comparison
@@ -166,10 +173,16 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 | pyttsx3 | - | ⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | All |
 | edge-tts | Cloud | ⭐⭐⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | All |
 | kokoro | 82M | ⭐⭐⭐⭐ | 🚀🚀 | Optional | ❌ | 3.9+ |
-| orpheus | 3B | ⭐⭐⭐⭐⭐ | 🚀 | Required | ✅ | 3.9+ |
+| orpheus | 3B | ⭐⭐⭐⭐⭐ | 🚀 | Optional | ✅ | 3.9+ |
 | xtts-v2 | ~1B | ⭐⭐⭐⭐ | 🚀 | Required | ✅ | 3.10-3.12 |
 
 ## Why Auralis instead of Coqui TTS?
 - Coqui TTS requires Python <3.12, incompatible with modern ComfyUI (Python 3.12/3.13)
 - Auralis wraps XTTS-v2 and works with Python 3.10+
 - Same voice cloning quality, modern Python support!
+
+## Why orpheus-cpp instead of orpheus-speech?
+- `orpheus-speech` requires vLLM, which doesn't work on Windows natively
+- `orpheus-cpp` uses llama.cpp backend - works on Windows/Linux/macOS!
+- CPU inference available (slower but no GPU required)
+- Same SOTA quality, cross-platform support!

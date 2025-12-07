@@ -17,9 +17,15 @@ edge-tts>=6.1.0     # Microsoft Edge TTS API (550+ voices)
 # misaki[en]          # English G2P (add [ja] for Japanese, [zh] for Chinese)
 
 # === ORPHEUS (optional - SOTA LLM-based TTS, 3B params) ===
-# Human-like speech with emotion tags, requires GPU
-# orpheus-speech      # Orpheus TTS (uses vLLM)
-# vllm==0.7.3         # Recommended stable version for Orpheus
+# Human-like speech with emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>
+# Uses llama.cpp backend - works on Windows/Linux/macOS without vLLM!
+# orpheus-cpp                    # Orpheus TTS with llama.cpp backend
+# First run downloads ~3GB GGUF model automatically
+#
+# For CPU inference:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# For GPU acceleration (CUDA 12.4):
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 
 # === XTTS-v2 / Auralis (optional - neural TTS with voice cloning) ===
 # Works with Python 3.10-3.12 (Coqui TTS requires Python <3.12)

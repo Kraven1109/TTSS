@@ -80,16 +80,23 @@ pip install kokoro soundfile
 
 ### 4. orpheus (SOTA LLM-based TTS) 🆕
 - ✅ **Human-like speech** - Superior to closed-source models
-- ✅ **Emotion tags** - `<laugh>`, `<sigh>`, `<gasp>`, `<chuckle>`
+- ✅ **Emotion tags** - `<laugh>`, `<sigh>`, `<gasp>`, `<chuckle>`, `<cough>`, `<sniffle>`, `<groan>`, `<yawn>`
 - ✅ **Zero-shot voice cloning**
 - ✅ **~200ms latency** - Real-time streaming
-- ⚠️ Requires **GPU** with vLLM
+- ✅ **Works on Windows/Linux/macOS** - via llama.cpp backend
+- ⚠️ **Python 3.10-3.12 required** for pre-built wheels
+- ⚠️ First run downloads ~3GB GGUF model
 
-**Installation:**
+**Installation (Python 3.10-3.12 only):**
 ```bash
-pip install orpheus-speech
-pip install vllm==0.7.3  # Stable version
+pip install orpheus-cpp
+# CPU inference:
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# GPU acceleration (CUDA 12.1-12.5):
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 ```
+
+> ⚠️ **Python 3.13**: No pre-built wheels. Requires building llama-cpp-python from source with CUDA toolkit.
 
 **Voices:** `tara`, `leah`, `jess`, `leo`, `dan`, `mia`, `zac`, `zoe`
 

@@ -500,39 +500,57 @@ class TTSSTextToSpeech:
             raise RuntimeError("[TTSS] Kokoro generated no audio")
     
     def _synth_orpheus(self, text, output_file, voice):
-        """Synthesize using Orpheus TTS (SOTA LLM-based TTS with emotions)."""
+        """Synthesize using Orpheus TTS via llama.cpp (SOTA LLM-based TTS with emotions).
+        
+        Uses orpheus-cpp package which runs on CPU/GPU via llama.cpp backend.
+        Works on Windows, Linux, and macOS without vLLM dependency.
+        
+        Supports emotion tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
+        
+        Requirements:
+        - Python 3.10-3.12 for pre-built CUDA wheels (Python 3.13 needs source build)
+        - pip install orpheus-cpp llama-cpp-python
+        """
+        # Check for llama-cpp-python first (more likely to fail)
         try:
-            from orpheus_tts import OrpheusModel
+            import llama_cpp
+        except ImportError:
+            raise ImportError(
+                "[TTSS] llama-cpp-python not installed or incompatible.\n\n"
+                "For Python 3.10-3.12 with CUDA:\n"
+                "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124\n\n"
+                "For Python 3.10-3.12 CPU only:\n"
+                "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu\n\n"
+                "⚠️ Python 3.13: No pre-built wheels available. Requires building from source with CUDA toolkit.\n"
+                "   See: https://github.com/abetlen/llama-cpp-python#installation"
+            )
+        
+        try:
+            from orpheus_cpp import OrpheusCpp
         except ImportError:
             raise ImportError(
                 "[TTSS] Orpheus TTS not installed. Run:\n"
-                "  pip install orpheus-speech\n"
-                "  pip install vllm==0.7.3  # Recommended stable version\n\n"
-                "Note: Orpheus requires GPU with vLLM for fast inference."
+                "  pip install orpheus-cpp\n\n"
+                "Note: First run will download ~3GB GGUF model."
             )
         
-        import wave
+        import numpy as np
+        from scipy.io.wavfile import write as wav_write
         
-        # Initialize Orpheus model
-        model = OrpheusModel(
-            model_name="canopylabs/orpheus-tts-0.1-finetune-prod",
-            max_model_len=2048
-        )
+        # Initialize Orpheus with llama.cpp backend
+        orpheus = OrpheusCpp(verbose=False, lang="en")
         
         # Generate speech with streaming
-        syn_tokens = model.generate_speech(
-            prompt=text,
-            voice=voice,
-        )
+        buffer = []
+        for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
+            buffer.append(chunk)
         
-        # Write audio chunks to WAV file
-        with wave.open(output_file, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(24000)
-            
-            for audio_chunk in syn_tokens:
-                wf.writeframes(audio_chunk)
+        if buffer:
+            # Concatenate all chunks and save
+            audio = np.concatenate(buffer, axis=1)
+            wav_write(output_file, 24000, np.concatenate(audio))
+        else:
+            raise RuntimeError("[TTSS] Orpheus generated no audio")
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""
