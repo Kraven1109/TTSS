@@ -530,8 +530,45 @@ class TTSSTextToSpeech:
                 "Note: First run will download ~3GB GGUF model."
             )
         
+        # Pre-download Orpheus models to ComfyUI directory (like ComfyUI_Qwen3-VL-Instruct)
+        lang_to_model = {
+            "en": "isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF",
+            "es": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
+            "fr": "freddyaboulton/3b-fr-ft-research_release-Q4_K_M-GGUF",
+            "de": "freddyaboulton/3b-de-ft-research_release-Q4_K_M-GGUF",
+            "it": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
+            "hi": "freddyaboulton/3b-hi-ft-research_release-Q4_K_M-GGUF",
+            "zh": "freddyaboulton/3b-zh-ft-research_release-Q4_K_M-GGUF",
+            "ko": "freddyaboulton/3b-ko-ft-research_release-Q4_K_M-GGUF",
+        }
+        
+        orpheus_repo = lang_to_model.get("en", lang_to_model["en"])  # Default to English
+        snac_repo = "onnx-community/snac_24khz-ONNX"
+        
+        # Download main Orpheus model
+        orpheus_model_path = os.path.join(tts_orpheus_path, os.path.basename(orpheus_repo))
+        if not os.path.exists(orpheus_model_path):
+            print(f"[TTSS] Downloading Orpheus model to: {orpheus_model_path}")
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=orpheus_repo,
+                local_dir=orpheus_model_path,
+                local_dir_use_symlinks=False,
+            )
+        
+        # Download SNAC model
+        snac_model_path = os.path.join(tts_orpheus_path, "snac_24khz-ONNX")
+        if not os.path.exists(snac_model_path):
+            print(f"[TTSS] Downloading SNAC model to: {snac_model_path}")
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=snac_repo,
+                local_dir=snac_model_path,
+                local_dir_use_symlinks=False,
+            )
+        
         # Initialize Orpheus with llama.cpp backend (GPU enabled)
-        # Temporarily set HF environment variables for Orpheus model downloads
+        # Set HF environment variables to point to our downloaded models
         old_hf_home = os.environ.get("HF_HOME")
         old_hf_hub_cache = os.environ.get("HF_HUB_CACHE")
         old_huggingface_hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
