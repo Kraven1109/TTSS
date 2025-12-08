@@ -671,7 +671,7 @@ class TTSSTextToSpeech:
             model = CsmForConditionalGeneration.from_pretrained(
                 model_id,
                 device_map=device,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                dtype=torch.float16 if device == "cuda" else torch.float32,
             )
         except Exception as e:
             error_msg = str(e)
@@ -685,9 +685,12 @@ class TTSSTextToSpeech:
             raise
         
         # Build conversation with speaker ID
-        # CSM uses [speaker_id] prefix in the text
+        # CSM expects role=speaker_id (as string) and content as list of typed dicts
         conversation = [
-            {"role": "user", "content": f"[{speaker_id}]{text}"}
+            {
+                "role": f"{speaker_id}",
+                "content": [{"type": "text", "text": text}]
+            }
         ]
         
         # If context audio provided, add it as conversation history
@@ -698,18 +701,20 @@ class TTSSTextToSpeech:
             if context_sr != 24000:
                 resampler = torchaudio.transforms.Resample(context_sr, 24000)
                 context_waveform = resampler(context_waveform)
-            # Add context as previous turn
+            # Add context as previous turn (audio comes from "path" key with array)
             conversation.insert(0, {
-                "role": "assistant", 
-                "content": f"[{speaker_id}]",
-                "audio": context_waveform.squeeze().numpy()
+                "role": f"{speaker_id}", 
+                "content": [
+                    {"type": "text", "text": ""},  # Empty text for context turn
+                    {"type": "audio", "path": context_waveform.squeeze().numpy()}
+                ]
             })
         
         # Process inputs
         inputs = processor.apply_chat_template(
             conversation,
             tokenize=True,
-            return_tensors="pt",
+            return_dict=True,
         ).to(device)
         
         # Generate audio

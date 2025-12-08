@@ -87,15 +87,17 @@ def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
     model = CsmForConditionalGeneration.from_pretrained(
         model_id,
         device_map="cuda",
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
     )
     
-    # Build conversation with speaker ID (0-9)
-    conversation = [{"role": "user", "content": f"[{speaker_id}]{text}"}]
+    # Build conversation - role is speaker ID, content is list of typed dicts
+    conversation = [
+        {"role": f"{speaker_id}", "content": [{"type": "text", "text": text}]}
+    ]
     
     # Process and generate
     inputs = processor.apply_chat_template(
-        conversation, tokenize=True, return_tensors="pt"
+        conversation, tokenize=True, return_dict=True
     ).to("cuda")
     
     audio_output = model.generate(**inputs, output_audio=True, max_new_tokens=2048)
