@@ -27,11 +27,6 @@ kokoro-onnx>=0.4.9    # Kokoro TTS with ONNX Runtime (auto-downloads model)
 # For GPU acceleration (CUDA 12.4):
 #   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 
-# === XTTS-v2 / Auralis (optional - neural TTS with voice cloning) ===
-# Works with Python 3.10-3.12 (Coqui TTS requires Python <3.12)
-# auralis>=0.2.8      # Auralis - XTTS-v2 wrapper
-# torch>=2.0.0        # PyTorch for neural TTS
-
 # Audio processing (pydub requires ffmpeg)
 # Install ffmpeg via: conda install ffmpeg or apt install ffmpeg
 scipy>=1.11.0

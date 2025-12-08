@@ -48,22 +48,19 @@ else:
 
 # Create subdirectories
 tts_reference_path = os.path.join(tts_models_path, "reference_audio")
-tts_xtts_path = os.path.join(tts_models_path, "xtts")  # For XTTS-v2 / Auralis models
 tts_voices_path = os.path.join(tts_models_path, "voices")
 tts_orpheus_path = os.path.join(tts_models_path, "orpheus")  # For Orpheus LLM-based TTS
 
-for path in [output_path, tts_models_path, tts_reference_path, tts_xtts_path, tts_voices_path, tts_orpheus_path]:
+for path in [output_path, tts_models_path, tts_reference_path, tts_voices_path, tts_orpheus_path]:
     os.makedirs(path, exist_ok=True)
 
-# Redirect HuggingFace cache to ComfyUI models directory (for Orpheus model downloads)
-os.environ["HF_HOME"] = tts_orpheus_path
-os.environ["HF_HUB_CACHE"] = tts_orpheus_path
-os.environ["HUGGINGFACE_HUB_CACHE"] = tts_orpheus_path
+# Note: HF environment variables are set temporarily during Orpheus usage to avoid
+# interfering with other ComfyUI nodes that use HuggingFace Hub
 
 # =============================================================================
 # TTS Engine Registry
 # =============================================================================
-TTS_ENGINES = ["pyttsx3", "edge-tts", "kokoro", "orpheus", "xtts-v2"]
+TTS_ENGINES = ["pyttsx3", "edge-tts", "kokoro", "orpheus"]
 
 # Kokoro voices (built-in, no reference audio needed)
 KOKORO_VOICES = [
@@ -176,26 +173,6 @@ def get_edge_tts_voices():
         "zh-CN-XiaoxiaoNeural", "zh-CN-YunxiNeural",
         ]
 
-def get_xtts_models():
-    """Get available XTTS models (Auralis-compatible)."""
-    models = []
-    
-    # Check for local converted models in xtts folder
-    xtts_path = os.path.join(tts_models_path, "xtts")
-    if os.path.exists(xtts_path):
-        for item in os.listdir(xtts_path):
-            item_path = os.path.join(xtts_path, item)
-            if os.path.isdir(item_path):
-                # Look for safetensors (Auralis format)
-                if any(f.endswith('.safetensors') for f in os.listdir(item_path)):
-                    models.append(item)
-    
-    # Default HuggingFace models (Auralis)
-    hf_models = [
-        "AstraMindAI/xttsv2",  # Auralis default
-    ]
-    return models + hf_models if models else hf_models
-
 def get_kokoro_voices():
     """Get available Kokoro voices."""
     return KOKORO_VOICES
@@ -228,7 +205,6 @@ class TTSSTextToSpeech:
     - edge-tts: Microsoft Edge TTS (online, high quality, free, 550+ voices)
     - kokoro: Lightweight neural TTS (82M params, fast, multi-language)
     - orpheus: SOTA LLM-based TTS with emotion tags (3B params, GPU)
-    - xtts-v2: Neural TTS with voice cloning via Auralis (GPU, Python 3.10-3.12)
     """
     
     @classmethod
@@ -236,7 +212,6 @@ class TTSSTextToSpeech:
         # Get voices for each engine
         pyttsx3_voices = get_pyttsx3_voices()
         edge_voices = get_edge_tts_voices()
-        xtts_models = get_xtts_models()
         kokoro_voices = get_kokoro_voices()
         orpheus_voices = get_orpheus_voices()
         
@@ -259,7 +234,6 @@ class TTSSTextToSpeech:
                 "kokoro_voice": (kokoro_voices, {"default": "af_heart"}),
                 "kokoro_lang": (list(KOKORO_LANGS.keys()), {"default": "a"}),
                 "orpheus_voice": (orpheus_voices, {"default": "tara"}),
-                "xtts_model": (xtts_models, {"default": xtts_models[0] if xtts_models else "AstraMindAI/xttsv2"}),
             },
             "optional": {
                 "text_input": ("STRING", {"forceInput": True, "multiline": True}),
@@ -276,8 +250,7 @@ class TTSSTextToSpeech:
     def synthesize(self, text, engine, speed, 
                    pyttsx3_voice="default", edge_voice="en-US-AriaNeural",
                    kokoro_voice="af_heart", kokoro_lang="a",
-                   orpheus_voice="tara",
-                   xtts_model="AstraMindAI/xttsv2", reference_audio="(none)",
+                   orpheus_voice="tara", reference_audio="(none)",
                    text_input=None, srt_input=None):
         """Generate speech from text using selected engine."""
         
@@ -295,8 +268,6 @@ class TTSSTextToSpeech:
             voice_name = kokoro_voice
         elif engine == "orpheus":
             voice_name = orpheus_voice
-        elif engine == "xtts-v2":
-            voice_name = xtts_model
         else:
             voice_name = ""
         
@@ -324,8 +295,6 @@ class TTSSTextToSpeech:
             self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed)
         elif engine == "orpheus":
             self._synth_orpheus(final_text, output_file, voice_name)
-        elif engine == "xtts-v2":
-            self._synth_xtts(final_text, output_file, voice_name, ref_audio_path)
         else:
             raise ValueError(f"[TTSS] Unknown engine: {engine}")
         
@@ -451,57 +420,6 @@ class TTSSTextToSpeech:
         if result_holder['error']:
             raise result_holder['error']
     
-    def _synth_xtts(self, text, output_file, model_name, reference_audio):
-        """Synthesize using XTTS-v2 via Auralis (Python 3.10+ compatible)."""
-        # Strip Orpheus-specific emotion tags (not supported by XTTS)
-        text = self._strip_emotion_tags(text)
-        
-        try:
-            from auralis import TTS, TTSRequest
-        except ImportError:
-            raise ImportError(
-                "[TTSS] Auralis not installed. Run: pip install auralis\n"
-                "Auralis provides XTTS-v2 support for Python 3.10+ (unlike Coqui TTS which requires Python <3.12)"
-            )
-        
-        # Initialize TTS model
-        model = model_name if model_name else "AstraMindAI/xttsv2"
-        
-        # Check if local path or HuggingFace model
-        xtts_local_path = os.path.join(tts_models_path, "xtts", model_name) if model_name else None
-        
-        if xtts_local_path and os.path.exists(xtts_local_path):
-            # Local converted model
-            tts = TTS().from_pretrained(xtts_local_path)
-        else:
-            # HuggingFace model
-            tts = TTS().from_pretrained(model, gpt_model='AstraMindAI/xtts2-gpt')
-        
-        # Create TTS request
-        request_kwargs = {"text": text}
-        
-        # Voice cloning with reference audio (required for XTTS)
-        if reference_audio and os.path.exists(reference_audio):
-            request_kwargs["speaker_files"] = [reference_audio]
-        else:
-            # XTTS requires reference audio for voice cloning
-            # Use a default reference if available
-            default_ref = os.path.join(tts_reference_path, "default.wav")
-            if os.path.exists(default_ref):
-                request_kwargs["speaker_files"] = [default_ref]
-            else:
-                raise ValueError(
-                    "[TTSS] XTTS-v2 requires reference audio for voice cloning.\n"
-                    "Please provide a reference audio file or place a 'default.wav' in:\n"
-                    f"  {tts_reference_path}"
-                )
-        
-        request = TTSRequest(**request_kwargs)
-        
-        # Generate speech
-        output = tts.generate_speech(request)
-        output.save(output_file)
-    
     def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
         """Synthesize using Kokoro TTS via ONNX Runtime (lightweight 82M neural TTS).
         
@@ -613,25 +531,51 @@ class TTSSTextToSpeech:
             )
         
         # Initialize Orpheus with llama.cpp backend (GPU enabled)
-        orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)
+        # Temporarily set HF environment variables for Orpheus model downloads
+        old_hf_home = os.environ.get("HF_HOME")
+        old_hf_hub_cache = os.environ.get("HF_HUB_CACHE")
+        old_huggingface_hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
         
-        # Generate speech with streaming
-        buffer = []
-        sample_rate = None
-        for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
-            if sample_rate is None:
-                sample_rate = sr
-            # Ensure chunk is 1D for concatenation
-            if chunk.ndim > 1:
-                chunk = chunk.flatten()
-            buffer.append(chunk)
+        os.environ["HF_HOME"] = tts_orpheus_path
+        os.environ["HF_HUB_CACHE"] = tts_orpheus_path
+        os.environ["HUGGINGFACE_HUB_CACHE"] = tts_orpheus_path
         
-        if buffer:
-            # Concatenate all chunks and save
-            audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
-            wav_write(output_file, sample_rate, audio)
-        else:
-            raise RuntimeError("[TTSS] Orpheus generated no audio")
+        try:
+            orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)
+            
+            # Generate speech with streaming
+            buffer = []
+            sample_rate = None
+            for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
+                if sample_rate is None:
+                    sample_rate = sr
+                # Ensure chunk is 1D for concatenation
+                if chunk.ndim > 1:
+                    chunk = chunk.flatten()
+                buffer.append(chunk)
+            
+            if buffer:
+                # Concatenate all chunks and save
+                audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
+                wav_write(output_file, sample_rate, audio)
+            else:
+                raise RuntimeError("[TTSS] Orpheus generated no audio")
+        finally:
+            # Restore original environment variables
+            if old_hf_home is not None:
+                os.environ["HF_HOME"] = old_hf_home
+            else:
+                os.environ.pop("HF_HOME", None)
+                
+            if old_hf_hub_cache is not None:
+                os.environ["HF_HUB_CACHE"] = old_hf_hub_cache
+            else:
+                os.environ.pop("HF_HUB_CACHE", None)
+                
+            if old_huggingface_hub_cache is not None:
+                os.environ["HUGGINGFACE_HUB_CACHE"] = old_huggingface_hub_cache
+            else:
+                os.environ.pop("HUGGINGFACE_HUB_CACHE", None)
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""

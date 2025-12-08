@@ -8,7 +8,6 @@ TTSS is a ComfyUI custom node package for multi-engine text-to-speech synthesis.
 - `edge-tts` - Microsoft Edge TTS (online, 550+ voices, free)
 - `kokoro` - Lightweight neural TTS (82M params, fast, multi-language)
 - `orpheus` - SOTA LLM-based TTS with emotion tags (3B params, GPU)
-- `xtts-v2` - Neural TTS with voice cloning via Auralis (GPU, Python 3.10-3.12)
 
 ## Project Structure
 ```
@@ -26,7 +25,6 @@ comfyUI-TTSS/
 ComfyUI/models/tts/
 ├── kokoro/              # Kokoro ONNX models
 ├── reference_audio/     # Voice cloning reference files (.wav, 6+ seconds)
-├── xtts/                # XTTS-v2 / Auralis models
 ├── orpheus/             # Orpheus LLM-based TTS models
 └── voices/              # Custom voice models
 ```
@@ -35,8 +33,7 @@ ComfyUI/models/tts/
 
 | Node | Purpose | Key Method | Engine Support |
 |------|---------|------------|----------------|
-| `TTSSTextToSpeech` | Main TTS synthesis (with built-in voice selection) | `synthesize()` | All 5 engines |
-| `TTSSLoadReferenceAudio` | Load voice reference | `load_reference()` | xtts-v2 |
+| `TTSSTextToSpeech` | Main TTS synthesis (with built-in voice selection) | `synthesize()` | All 4 engines |
 | `TTSSLoadAudio` | Load audio files | `load_audio()` | - |
 | `TTSSLoadSRT` | Load SRT subtitles | `load_srt()` | - |
 | `TTSSPreviewAudio` | Audio preview in UI | `preview()` | - |
@@ -49,7 +46,7 @@ ComfyUI/models/tts/
 ```python
 def synthesize(self, text, engine, speed, 
                pyttsx3_voice, edge_voice, kokoro_voice, kokoro_lang,
-               orpheus_voice, xtts_model, reference_audio, ...):
+               orpheus_voice, reference_audio, ...):
     if engine == "pyttsx3":
         self._synth_pyttsx3(text, output_file, pyttsx3_voice, speed)
     elif engine == "edge-tts":
@@ -58,8 +55,6 @@ def synthesize(self, text, engine, speed,
         self._synth_kokoro(text, output_file, kokoro_voice, kokoro_lang, speed)
     elif engine == "orpheus":
         self._synth_orpheus(text, output_file, orpheus_voice)
-    elif engine == "xtts-v2":
-        self._synth_xtts(text, output_file, xtts_model, reference_audio)
 ```
 
 ### Kokoro TTS (82M params, ONNX Runtime, Python 3.10-3.13)
@@ -103,16 +98,6 @@ def _synth_orpheus(self, text, output_file, voice):
     wav_write(output_file, sample_rate, audio)
     # Supports emotion tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
     # Additional expressive tags: <happy>, <normal>, <disgust>, <sad>, <frustrated>, <slow>, <excited>, <whisper>, <panicky>, <curious>, <surprise>, <fast>, <crying>, <deep>, <sleepy>, <angry>, <high>, <shout>
-```
-
-### XTTS-v2 via Auralis (Python 3.10-3.12)
-```python
-def _synth_xtts(self, text, output_file, model_name, reference_audio):
-    from auralis import TTS, TTSRequest
-    tts = TTS().from_pretrained(model_name, gpt_model='AstraMindAI/xtts2-gpt')
-    request = TTSRequest(text=text, speaker_files=[reference_audio])
-    output = tts.generate_speech(request)
-    output.save(output_file)
 ```
 
 ### Dynamic Voice Loading
@@ -182,7 +167,6 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 - edge-tts (Microsoft TTS, 550+ voices)
 - kokoro-onnx (lightweight neural TTS, 82M params, Python 3.10-3.13)
 - orpheus-cpp + llama-cpp-python (SOTA LLM TTS, llama.cpp backend, works on Windows!)
-- auralis (XTTS-v2 voice cloning, Python 3.10-3.12)
 
 ## Engine Comparison
 
@@ -192,12 +176,6 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 | edge-tts | Cloud | ⭐⭐⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | All |
 | kokoro | 82M | ⭐⭐⭐⭐ | 🚀🚀 | Optional | ❌ | 3.10-3.13 |
 | orpheus | 3B | ⭐⭐⭐⭐⭐ | 🚀 | Optional | ✅ | 3.10-3.12 |
-| xtts-v2 | ~1B | ⭐⭐⭐⭐ | 🚀 | Required | ✅ | 3.10-3.12 |
-
-## Why Auralis instead of Coqui TTS?
-- Coqui TTS requires Python <3.12, incompatible with modern ComfyUI (Python 3.12/3.13)
-- Auralis wraps XTTS-v2 and works with Python 3.10+
-- Same voice cloning quality, modern Python support!
 
 ## Why orpheus-cpp instead of orpheus-speech?
 - `orpheus-speech` requires vLLM, which doesn't work on Windows natively
