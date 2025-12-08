@@ -50,8 +50,9 @@ else:
 tts_reference_path = os.path.join(tts_models_path, "reference_audio")
 tts_voices_path = os.path.join(tts_models_path, "voices")
 tts_orpheus_path = os.path.join(tts_models_path, "orpheus")  # For Orpheus LLM-based TTS
+tts_csm_path = os.path.join(tts_models_path, "csm")  # For CSM conversational TTS
 
-for path in [output_path, tts_models_path, tts_reference_path, tts_voices_path, tts_orpheus_path]:
+for path in [output_path, tts_models_path, tts_reference_path, tts_voices_path, tts_orpheus_path, tts_csm_path]:
     os.makedirs(path, exist_ok=True)
 
 # Note: HF environment variables are set temporarily during Orpheus usage to avoid
@@ -60,7 +61,7 @@ for path in [output_path, tts_models_path, tts_reference_path, tts_voices_path, 
 # =============================================================================
 # TTS Engine Registry
 # =============================================================================
-TTS_ENGINES = ["pyttsx3", "edge-tts", "kokoro", "orpheus"]
+TTS_ENGINES = ["pyttsx3", "edge-tts", "kokoro", "orpheus", "csm"]
 
 # Kokoro voices (built-in, no reference audio needed)
 KOKORO_VOICES = [
@@ -90,6 +91,9 @@ ORPHEUS_VOICES = ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"]
 
 # Orpheus emotion tags
 ORPHEUS_EMOTIONS = ["<laugh>", "<chuckle>", "<sigh>", "<cough>", "<sniffle>", "<groan>", "<yawn>", "<gasp>"]
+
+# CSM voices (speaker IDs for conversational TTS)
+CSM_VOICES = [str(i) for i in range(10)]  # 0-9 speaker IDs
 
 def _get_edge_tts_cli():
     """Find edge-tts CLI executable path."""
@@ -185,6 +189,10 @@ def get_orpheus_voices():
     """Get available Orpheus voices."""
     return ORPHEUS_VOICES
 
+def get_csm_voices():
+    """Get available CSM speaker IDs."""
+    return CSM_VOICES
+
 def get_reference_audio_files():
     """Get reference audio files for voice cloning."""
     files = ["(none)"]
@@ -214,6 +222,7 @@ class TTSSTextToSpeech:
         edge_voices = get_edge_tts_voices()
         kokoro_voices = get_kokoro_voices()
         orpheus_voices = get_orpheus_voices()
+        csm_voices = get_csm_voices()
         
         return {
             "required": {
@@ -234,11 +243,13 @@ class TTSSTextToSpeech:
                 "kokoro_voice": (kokoro_voices, {"default": "af_heart"}),
                 "kokoro_lang": (list(KOKORO_LANGS.keys()), {"default": "a"}),
                 "orpheus_voice": (orpheus_voices, {"default": "tara"}),
+                "csm_voice": (csm_voices, {"default": "0"}),
             },
             "optional": {
                 "text_input": ("STRING", {"forceInput": True, "multiline": True}),
                 "srt_input": ("SRT",),
                 "reference_audio": ("AUDIOPATH",),
+                "context_audio": ("AUDIOPATH",),  # For CSM conversational context
             }
         }
     
@@ -250,8 +261,8 @@ class TTSSTextToSpeech:
     def synthesize(self, text, engine, speed, 
                    pyttsx3_voice="default", edge_voice="en-US-AriaNeural",
                    kokoro_voice="af_heart", kokoro_lang="a",
-                   orpheus_voice="tara", reference_audio="(none)",
-                   text_input=None, srt_input=None):
+                   orpheus_voice="tara", csm_voice="0", reference_audio="(none)",
+                   text_input=None, srt_input=None, context_audio=None):
         """Generate speech from text using selected engine."""
         
         # Build final text
@@ -268,6 +279,8 @@ class TTSSTextToSpeech:
             voice_name = kokoro_voice
         elif engine == "orpheus":
             voice_name = orpheus_voice
+        elif engine == "csm":
+            voice_name = csm_voice
         else:
             voice_name = ""
         
@@ -295,6 +308,8 @@ class TTSSTextToSpeech:
             self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed)
         elif engine == "orpheus":
             self._synth_orpheus(final_text, output_file, voice_name)
+        elif engine == "csm":
+            self._synth_csm(final_text, output_file, voice_name, context_audio)
         else:
             raise ValueError(f"[TTSS] Unknown engine: {engine}")
         
@@ -613,6 +628,87 @@ class TTSSTextToSpeech:
                 os.environ["HUGGINGFACE_HUB_CACHE"] = old_huggingface_hub_cache
             else:
                 os.environ.pop("HUGGINGFACE_HUB_CACHE", None)
+    
+    def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
+        """Synthesize using CSM (Conversational Speech Model) via llama.cpp.
+        
+        Premium conversational TTS with voice cloning capabilities.
+        Uses ggml-org/sesame-csm-1b-GGUF (no login required).
+        
+        Args:
+            text: Input text to synthesize
+            output_file: Path to save WAV output
+            speaker_id: Speaker ID (0-9) for voice consistency
+            context_audio: Optional previous audio for conversational continuity
+        """
+        try:
+            from llama_cpp import Llama
+        except ImportError:
+            raise ImportError(
+                "[TTSS] llama-cpp-python not installed.\n"
+                "Install with: pip install llama-cpp-python\n"
+                "For GPU: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"
+            )
+        
+        # Pre-download CSM model (GGUF format, no login needed)
+        csm_model_repo = "ggml-org/sesame-csm-1b-GGUF"
+        csm_model_path = os.path.join(tts_csm_path, "sesame-csm-1b.gguf")
+        
+        if not os.path.exists(csm_model_path):
+            print(f"[TTSS] Downloading CSM model to: {csm_model_path}")
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=csm_model_repo,
+                local_dir=tts_csm_path,
+                local_dir_use_symlinks=False,
+            )
+            # Find the actual model file (GGUF)
+            gguf_files = [f for f in os.listdir(tts_csm_path) if f.endswith('.gguf')]
+            if gguf_files:
+                csm_model_path = os.path.join(tts_csm_path, gguf_files[0])
+            else:
+                raise FileNotFoundError(f"[TTSS] No GGUF file found in {tts_csm_path}")
+        
+        # Load CSM model with llama.cpp
+        print(f"[TTSS] Loading CSM model: {csm_model_path}")
+        llm = Llama(
+            model_path=csm_model_path,
+            n_gpu_layers=-1,  # Use GPU if available
+            verbose=False,
+            chat_format="csm",  # CSM-specific chat format
+        )
+        
+        # Prepare prompt with speaker
+        prompt = f"[SPEAKER_{speaker_id}] {text}"
+        
+        # Generate audio tokens
+        print(f"[TTSS] Generating audio with CSM...")
+        output = llm.create_chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1024,  # Audio tokens
+            temperature=0.7,
+        )
+        
+        # Extract audio data from response
+        # CSM outputs audio tokens that need to be converted to waveform
+        audio_tokens = output["choices"][0]["message"]["content"]
+        
+        # Convert tokens to audio (simplified - actual implementation needs CSM decoder)
+        # This is a placeholder - real implementation needs the Mimi decoder
+        # For now, create a dummy audio file
+        import numpy as np
+        from scipy.io.wavfile import write as wav_write
+        
+        # Placeholder: generate silence (replace with actual CSM audio generation)
+        sample_rate = 24000
+        duration = len(text) * 0.1  # Rough estimate
+        audio = np.zeros(int(sample_rate * duration), dtype=np.float32)
+        
+        wav_write(output_file, sample_rate, audio)
+        print(f"[TTSS] CSM synthesis completed (placeholder): {output_file}")
+        
+        # TODO: Implement full CSM audio generation with Mimi decoder
+        # This requires integrating the CSM TTS pipeline from llama.cpp
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""

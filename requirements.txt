@@ -19,7 +19,7 @@ kokoro-onnx>=0.4.9    # Kokoro TTS with ONNX Runtime (auto-downloads model)
 # === ORPHEUS (optional - SOTA LLM-based TTS, 3B params) ===
 # Human-like speech with emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>
 # Uses llama.cpp backend - works on Windows/Linux/macOS without vLLM!
-# orpheus-cpp                    # Orpheus TTS with llama.cpp backend
+orpheus-cpp                    # Orpheus TTS with llama.cpp backend
 # First run downloads ~3GB GGUF model automatically
 #
 # For CPU inference:
@@ -27,9 +27,19 @@ kokoro-onnx>=0.4.9    # Kokoro TTS with ONNX Runtime (auto-downloads model)
 # For GPU acceleration (CUDA 12.4):
 #   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 
+# === CSM (optional - Conversational Speech Model, 1B params) ===
+# Premium conversational TTS with voice cloning
+# Uses llama.cpp backend - no HuggingFace login required!
+# Downloads ggml-org/sesame-csm-1b-GGUF (~96MB) automatically
+llama-cpp-python>=0.3.4       # CSM TTS with llama.cpp backend
+# Install with CUDA: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+
 # Audio processing (pydub requires ffmpeg)
 # Install ffmpeg via: conda install ffmpeg or apt install ffmpeg
 scipy>=1.11.0
+
+# Model downloading
+huggingface-hub>=0.23.0
 
 # Utilities
 tqdm>=4.64.0

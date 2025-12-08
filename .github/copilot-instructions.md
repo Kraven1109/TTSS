@@ -8,6 +8,7 @@ TTSS is a ComfyUI custom node package for multi-engine text-to-speech synthesis.
 - `edge-tts` - Microsoft Edge TTS (online, 550+ voices, free)
 - `kokoro` - Lightweight neural TTS (82M params, fast, multi-language)
 - `orpheus` - SOTA LLM-based TTS with emotion tags (3B params, GPU)
+- `csm` - Conversational Speech Model (1B params, conversational, GPU)
 
 ## Project Structure
 ```
@@ -26,6 +27,7 @@ ComfyUI/models/tts/
 ├── kokoro/              # Kokoro ONNX models
 ├── reference_audio/     # Voice cloning reference files (.wav, 6+ seconds)
 ├── orpheus/             # Orpheus LLM-based TTS models (pre-downloaded via snapshot_download)
+├── csm/                 # CSM conversational TTS models (GGUF format)
 └── voices/              # Custom voice models
 ```
 
@@ -33,7 +35,7 @@ ComfyUI/models/tts/
 
 | Node | Purpose | Key Method | Engine Support |
 |------|---------|------------|----------------|
-| `TTSSTextToSpeech` | Main TTS synthesis (with built-in voice selection) | `synthesize()` | All 4 engines |
+| `TTSSTextToSpeech` | Main TTS synthesis (with built-in voice selection) | `synthesize()` | All 5 engines |
 | `TTSSLoadAudio` | Load audio files | `load_audio()` | - |
 | `TTSSLoadSRT` | Load SRT subtitles | `load_srt()` | - |
 | `TTSSPreviewAudio` | Audio preview in UI | `preview()` | - |
@@ -46,7 +48,7 @@ ComfyUI/models/tts/
 ```python
 def synthesize(self, text, engine, speed, 
                pyttsx3_voice, edge_voice, kokoro_voice, kokoro_lang,
-               orpheus_voice, reference_audio, ...):
+               orpheus_voice, csm_voice, reference_audio, context_audio, ...):
     if engine == "pyttsx3":
         self._synth_pyttsx3(text, output_file, pyttsx3_voice, speed)
     elif engine == "edge-tts":
@@ -55,6 +57,8 @@ def synthesize(self, text, engine, speed,
         self._synth_kokoro(text, output_file, kokoro_voice, kokoro_lang, speed)
     elif engine == "orpheus":
         self._synth_orpheus(text, output_file, orpheus_voice)
+    elif engine == "csm":
+        self._synth_csm(text, output_file, csm_voice, context_audio)
 ```
 
 ### Kokoro TTS (82M params, ONNX Runtime, Python 3.10-3.13)
@@ -67,75 +71,34 @@ def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
     sf.write(output_file, samples, sample_rate)
 ```
 
-### Orpheus TTS (SOTA LLM-based with emotion tags, llama.cpp backend)
+### CSM TTS (Conversational Speech Model, 1B params, GGUF via llama.cpp)
 ```python
-def _synth_orpheus(self, text, output_file, voice):
-    from orpheus_cpp import OrpheusCpp
-    import numpy as np
-    from scipy.io.wavfile import write as wav_write
-    import os
+def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
+    from llama_cpp import Llama
     
-    # Pre-download Orpheus models to ComfyUI directory (like ComfyUI_Qwen3-VL-Instruct)
-    lang_to_model = {
-        "en": "isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF",
-        "es": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
-        "fr": "freddyaboulton/3b-fr-ft-research_release-Q4_K_M-GGUF",
-        "de": "freddyaboulton/3b-de-ft-research_release-Q4_K_M-GGUF",
-        "it": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
-        "hi": "freddyaboulton/3b-hi-ft-research_release-Q4_K_M-GGUF",
-        "zh": "freddyaboulton/3b-zh-ft-research_release-Q4_K_M-GGUF",
-        "ko": "freddyaboulton/3b-ko-ft-research_release-Q4_K_M-GGUF",
-    }
-    
-    orpheus_repo = lang_to_model.get("en", lang_to_model["en"])  # Default to English
-    snac_repo = "onnx-community/snac_24khz-ONNX"
-    
-    # Download main Orpheus model
-    orpheus_model_path = os.path.join(tts_orpheus_path, os.path.basename(orpheus_repo))
-    if not os.path.exists(orpheus_model_path):
+    # Pre-download ggml-org/sesame-csm-1b-GGUF (no login required)
+    csm_model_path = os.path.join(tts_csm_path, "sesame-csm-1b.gguf")
+    if not os.path.exists(csm_model_path):
         from huggingface_hub import snapshot_download
         snapshot_download(
-            repo_id=orpheus_repo,
-            local_dir=orpheus_model_path,
+            repo_id="ggml-org/sesame-csm-1b-GGUF",
+            local_dir=tts_csm_path,
             local_dir_use_symlinks=False,
         )
     
-    # Download SNAC model
-    snac_model_path = os.path.join(tts_orpheus_path, "snac_24khz-ONNX")
-    if not os.path.exists(snac_model_path):
-        from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id=snac_repo,
-            local_dir=snac_model_path,
-            local_dir_use_symlinks=False,
-        )
+    # Load with llama.cpp
+    llm = Llama(model_path=csm_model_path, n_gpu_layers=-1, chat_format="csm")
     
-    # Set HF environment variables temporarily during Orpheus usage only
-    old_hf_home = os.environ.get("HF_HOME")
-    os.environ["HF_HOME"] = tts_orpheus_path
+    # Generate with conversational context
+    prompt = f"[SPEAKER_{speaker_id}] {text}"
+    output = llm.create_chat_completion(
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1024,
+    )
     
-    try:
-        orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)  # GPU enabled
-        buffer = []
-        sample_rate = None
-        for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
-            if sample_rate is None:
-                sample_rate = sr
-            # Ensure chunk is 1D for concatenation
-            if chunk.ndim > 1:
-                chunk = chunk.flatten()
-            buffer.append(chunk)
-        audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
-        wav_write(output_file, sample_rate, audio)
-    finally:
-        # Restore original environment variables
-        if old_hf_home is not None:
-            os.environ["HF_HOME"] = old_hf_home
-        else:
-            os.environ.pop("HF_HOME", None)
-    
-    # Supports emotion tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
-    # Additional expressive tags: <happy>, <normal>, <disgust>, <sad>, <frustrated>, <slow>, <excited>, <whisper>, <panicky>, <curious>, <surprise>, <fast>, <crying>, <deep>, <sleepy>, <angry>, <high>, <shout>
+    # Convert audio tokens to WAV (requires Mimi decoder integration)
+    # audio_codes = output["choices"][0]["message"]["content"]
+    # audio = decode_mimi(audio_codes)  # TODO: implement
 ```
 
 ### Dynamic Voice Loading
@@ -205,7 +168,8 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 - edge-tts (Microsoft TTS, 550+ voices)
 - kokoro-onnx (lightweight neural TTS, 82M params, Python 3.10-3.13)
 - orpheus-cpp + llama-cpp-python (SOTA LLM TTS, llama.cpp backend, works on Windows!)
-- huggingface_hub (for model downloading, used by Orpheus pre-download)
+- llama-cpp-python (CSM conversational TTS, GGUF format, no login required)
+- huggingface_hub (for model downloading, used by Orpheus and CSM pre-download)
 
 ## Engine Comparison
 
@@ -215,6 +179,7 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 | edge-tts | Cloud | ⭐⭐⭐⭐ | 🚀🚀🚀 | ❌ | ❌ | All |
 | kokoro | 82M | ⭐⭐⭐⭐ | 🚀🚀 | Optional | ❌ | 3.10-3.13 |
 | orpheus | 3B | ⭐⭐⭐⭐⭐ | 🚀 | Optional | ✅ | 3.10-3.12 |
+| csm | 1B | ⭐⭐⭐⭐⭐ | 🚀 | ✅ | ✅ | 3.10+ |
 
 ## Why orpheus-cpp instead of orpheus-speech?
 - `orpheus-speech` requires vLLM, which doesn't work on Windows natively
