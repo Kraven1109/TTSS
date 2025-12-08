@@ -569,18 +569,24 @@ class TTSSTextToSpeech:
         import numpy as np
         from scipy.io.wavfile import write as wav_write
         
-        # Initialize Orpheus with llama.cpp backend
-        orpheus = OrpheusCpp(verbose=False, lang="en")
+        # Initialize Orpheus with llama.cpp backend (GPU enabled)
+        orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)
         
         # Generate speech with streaming
         buffer = []
+        sample_rate = None
         for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
+            if sample_rate is None:
+                sample_rate = sr
+            # Ensure chunk is 1D for concatenation
+            if chunk.ndim > 1:
+                chunk = chunk.flatten()
             buffer.append(chunk)
         
         if buffer:
             # Concatenate all chunks and save
-            audio = np.concatenate(buffer, axis=1)
-            wav_write(output_file, 24000, np.concatenate(audio))
+            audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
+            wav_write(output_file, sample_rate, audio)
         else:
             raise RuntimeError("[TTSS] Orpheus generated no audio")
     

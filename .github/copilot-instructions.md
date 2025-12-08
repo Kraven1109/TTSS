@@ -77,12 +77,18 @@ def _synth_orpheus(self, text, output_file, voice):
     import numpy as np
     from scipy.io.wavfile import write as wav_write
     
-    orpheus = OrpheusCpp(verbose=False, lang="en")
+    orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)  # GPU enabled
     buffer = []
+    sample_rate = None
     for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
+        if sample_rate is None:
+            sample_rate = sr
+        # Ensure chunk is 1D for concatenation
+        if chunk.ndim > 1:
+            chunk = chunk.flatten()
         buffer.append(chunk)
-    audio = np.concatenate(buffer, axis=1)
-    wav_write(output_file, 24000, np.concatenate(audio))
+    audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
+    wav_write(output_file, sample_rate, audio)
     # Supports emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>, <cough>, <sniffle>, <groan>, <yawn>
 ```
 
