@@ -101,7 +101,8 @@ def _synth_orpheus(self, text, output_file, voice):
         buffer.append(chunk)
     audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
     wav_write(output_file, sample_rate, audio)
-    # Supports emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>, <cough>, <sniffle>, <groan>, <yawn>
+    # Supports emotion tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
+    # Additional expressive tags: <happy>, <normal>, <disgust>, <sad>, <frustrated>, <slow>, <excited>, <whisper>, <panicky>, <curious>, <surprise>, <fast>, <crying>, <deep>, <sleepy>, <angry>, <high>, <shout>
 ```
 
 ### XTTS-v2 via Auralis (Python 3.10-3.12)
