@@ -4,7 +4,14 @@ Text-to-Speech nodes with multiple engine support.
 Supports: pyttsx3 (offline), edge-tts (Microsoft), Coqui TTS (neural).
 """
 
+# =============================================================================
+# Environment Variables (MUST be set BEFORE any imports to take effect)
+# =============================================================================
 import os
+
+# Suppress ONNX Runtime CUDA warnings (must be set before any ONNX import)
+os.environ["ORT_LOG_SEVERITY_LEVEL"] = "3"  # Error level only (0=Verbose, 1=Info, 2=Warning, 3=Error, 4=Fatal)
+
 import time
 import json
 import hashlib
@@ -43,9 +50,15 @@ else:
 tts_reference_path = os.path.join(tts_models_path, "reference_audio")
 tts_xtts_path = os.path.join(tts_models_path, "xtts")  # For XTTS-v2 / Auralis models
 tts_voices_path = os.path.join(tts_models_path, "voices")
+tts_orpheus_path = os.path.join(tts_models_path, "orpheus")  # For Orpheus LLM-based TTS
 
-for path in [output_path, tts_models_path, tts_reference_path, tts_xtts_path, tts_voices_path]:
+for path in [output_path, tts_models_path, tts_reference_path, tts_xtts_path, tts_voices_path, tts_orpheus_path]:
     os.makedirs(path, exist_ok=True)
+
+# Redirect HuggingFace cache to ComfyUI models directory (for Orpheus model downloads)
+os.environ["HF_HOME"] = tts_orpheus_path
+os.environ["HF_HUB_CACHE"] = tts_orpheus_path
+os.environ["HUGGINGFACE_HUB_CACHE"] = tts_orpheus_path
 
 # =============================================================================
 # TTS Engine Registry
@@ -335,9 +348,26 @@ class TTSSTextToSpeech:
                 parts.append(srt_text)
         return " ".join(parts)
     
+    def _strip_emotion_tags(self, text):
+        """Strip Orpheus-specific emotion/expressive tags for non-Orpheus engines.
+        
+        Tags like <laugh>, <sigh>, <whisper>, etc. are only supported by Orpheus TTS.
+        Other engines will fail if these tags are present in the text.
+        """
+        import re
+        # Remove all <tag> style tags (Orpheus emotion/expressive tags)
+        cleaned = re.sub(r'<[a-zA-Z_]+>', '', text)
+        # Clean up extra whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+    
     def _synth_pyttsx3(self, text, output_file, voice_name, speed):
         """Synthesize using pyttsx3 (offline system voices)."""
         import pyttsx3
+        
+        # Strip Orpheus-specific emotion tags (not supported by pyttsx3)
+        text = self._strip_emotion_tags(text)
+        
         engine = pyttsx3.init()
         
         # Set speed
@@ -359,6 +389,9 @@ class TTSSTextToSpeech:
     def _synth_edge_tts(self, text, output_file, voice_name, speed):
         """Synthesize using Microsoft Edge TTS via CLI (avoids async issues)."""
         voice = voice_name if voice_name else "en-US-AriaNeural"
+        
+        # Strip Orpheus-specific emotion tags (not supported by edge-tts)
+        text = self._strip_emotion_tags(text)
         
         # Use edge-tts CLI to avoid asyncio conflicts with ComfyUI
         edge_tts_cmd = _get_edge_tts_cli()
@@ -420,6 +453,9 @@ class TTSSTextToSpeech:
     
     def _synth_xtts(self, text, output_file, model_name, reference_audio):
         """Synthesize using XTTS-v2 via Auralis (Python 3.10+ compatible)."""
+        # Strip Orpheus-specific emotion tags (not supported by XTTS)
+        text = self._strip_emotion_tags(text)
+        
         try:
             from auralis import TTS, TTSRequest
         except ImportError:
@@ -472,6 +508,9 @@ class TTSSTextToSpeech:
         Uses kokoro-onnx package which works on Python 3.10-3.13.
         First run will download ~300MB model files.
         """
+        # Strip Orpheus-specific emotion tags (not supported by Kokoro)
+        text = self._strip_emotion_tags(text)
+        
         try:
             from kokoro_onnx import Kokoro
             import soundfile as sf
@@ -540,11 +579,16 @@ class TTSSTextToSpeech:
         Works on Windows, Linux, and macOS without vLLM dependency.
         
         Supports emotion tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
+        Additional expressive tags: <happy>, <normal>, <disgust>, <sad>, <frustrated>, <slow>, <excited>, 
+        <whisper>, <panicky>, <curious>, <surprise>, <fast>, <crying>, <deep>, <sleepy>, <angry>, <high>, <shout>
         
         Requirements:
         - Python 3.10-3.12 for pre-built CUDA wheels (Python 3.13 needs source build)
         - pip install orpheus-cpp llama-cpp-python
         """
+        import numpy as np
+        from scipy.io.wavfile import write as wav_write
+        
         # Check for llama-cpp-python first (more likely to fail)
         try:
             import llama_cpp
@@ -567,18 +611,6 @@ class TTSSTextToSpeech:
                 "  pip install orpheus-cpp\n\n"
                 "Note: First run will download ~3GB GGUF model."
             )
-        
-        import numpy as np
-        from scipy.io.wavfile import write as wav_write
-        
-        # Set model cache to ComfyUI models directory (follows ComfyUI convention)
-        orpheus_models_path = os.path.join(tts_models_path, "orpheus")
-        os.makedirs(orpheus_models_path, exist_ok=True)
-        os.environ["HF_HOME"] = orpheus_models_path
-        
-        # Suppress ONNX Runtime CUDA warnings for better UX
-        os.environ["ORT_LOG_SEVERITY_LEVEL"] = "2"  # Warning level only
-        os.environ["ORT_DISABLE_CUDA_GRAPH"] = "1"  # Disable CUDA graph warnings
         
         # Initialize Orpheus with llama.cpp backend (GPU enabled)
         orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)
