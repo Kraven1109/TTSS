@@ -25,7 +25,7 @@ comfyUI-TTSS/
 ComfyUI/models/tts/
 ├── kokoro/              # Kokoro ONNX models
 ├── reference_audio/     # Voice cloning reference files (.wav, 6+ seconds)
-├── orpheus/             # Orpheus LLM-based TTS models
+├── orpheus/             # Orpheus LLM-based TTS models (pre-downloaded via snapshot_download)
 └── voices/              # Custom voice models
 ```
 
@@ -75,27 +75,65 @@ def _synth_orpheus(self, text, output_file, voice):
     from scipy.io.wavfile import write as wav_write
     import os
     
-    # Set model cache to ComfyUI models directory
-    orpheus_models_path = os.path.join(tts_models_path, "orpheus")
-    os.makedirs(orpheus_models_path, exist_ok=True)
-    os.environ["HF_HOME"] = orpheus_models_path
+    # Pre-download Orpheus models to ComfyUI directory (like ComfyUI_Qwen3-VL-Instruct)
+    lang_to_model = {
+        "en": "isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF",
+        "es": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
+        "fr": "freddyaboulton/3b-fr-ft-research_release-Q4_K_M-GGUF",
+        "de": "freddyaboulton/3b-de-ft-research_release-Q4_K_M-GGUF",
+        "it": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
+        "hi": "freddyaboulton/3b-hi-ft-research_release-Q4_K_M-GGUF",
+        "zh": "freddyaboulton/3b-zh-ft-research_release-Q4_K_M-GGUF",
+        "ko": "freddyaboulton/3b-ko-ft-research_release-Q4_K_M-GGUF",
+    }
     
-    # Suppress ONNX Runtime CUDA warnings for better UX
-    os.environ["ORT_LOG_SEVERITY_LEVEL"] = "2"  # Warning level only
-    os.environ["ORT_DISABLE_CUDA_GRAPH"] = "1"  # Disable CUDA graph warnings
+    orpheus_repo = lang_to_model.get("en", lang_to_model["en"])  # Default to English
+    snac_repo = "onnx-community/snac_24khz-ONNX"
     
-    orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)  # GPU enabled
-    buffer = []
-    sample_rate = None
-    for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
-        if sample_rate is None:
-            sample_rate = sr
-        # Ensure chunk is 1D for concatenation
-        if chunk.ndim > 1:
-            chunk = chunk.flatten()
-        buffer.append(chunk)
-    audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
-    wav_write(output_file, sample_rate, audio)
+    # Download main Orpheus model
+    orpheus_model_path = os.path.join(tts_orpheus_path, os.path.basename(orpheus_repo))
+    if not os.path.exists(orpheus_model_path):
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=orpheus_repo,
+            local_dir=orpheus_model_path,
+            local_dir_use_symlinks=False,
+        )
+    
+    # Download SNAC model
+    snac_model_path = os.path.join(tts_orpheus_path, "snac_24khz-ONNX")
+    if not os.path.exists(snac_model_path):
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=snac_repo,
+            local_dir=snac_model_path,
+            local_dir_use_symlinks=False,
+        )
+    
+    # Set HF environment variables temporarily during Orpheus usage only
+    old_hf_home = os.environ.get("HF_HOME")
+    os.environ["HF_HOME"] = tts_orpheus_path
+    
+    try:
+        orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)  # GPU enabled
+        buffer = []
+        sample_rate = None
+        for i, (sr, chunk) in enumerate(orpheus.stream_tts_sync(text, options={"voice_id": voice})):
+            if sample_rate is None:
+                sample_rate = sr
+            # Ensure chunk is 1D for concatenation
+            if chunk.ndim > 1:
+                chunk = chunk.flatten()
+            buffer.append(chunk)
+        audio = np.concatenate(buffer, axis=0)  # Concatenate along time axis
+        wav_write(output_file, sample_rate, audio)
+    finally:
+        # Restore original environment variables
+        if old_hf_home is not None:
+            os.environ["HF_HOME"] = old_hf_home
+        else:
+            os.environ.pop("HF_HOME", None)
+    
     # Supports emotion tags: <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
     # Additional expressive tags: <happy>, <normal>, <disgust>, <sad>, <frustrated>, <slow>, <excited>, <whisper>, <panicky>, <curious>, <surprise>, <fast>, <crying>, <deep>, <sleepy>, <angry>, <high>, <shout>
 ```
@@ -167,6 +205,7 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 - edge-tts (Microsoft TTS, 550+ voices)
 - kokoro-onnx (lightweight neural TTS, 82M params, Python 3.10-3.13)
 - orpheus-cpp + llama-cpp-python (SOTA LLM TTS, llama.cpp backend, works on Windows!)
+- huggingface_hub (for model downloading, used by Orpheus pre-download)
 
 ## Engine Comparison
 
@@ -182,3 +221,10 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 - `orpheus-cpp` uses llama.cpp backend - works on Windows/Linux/macOS!
 - CPU inference available (slower but no GPU required)
 - Same SOTA quality, cross-platform support!
+
+## Why snapshot_download approach like ComfyUI_Qwen3-VL-Instruct?
+- **Prevents user cache pollution**: Models download to `ComfyUI/models/tts/orpheus/` instead of `~/.cache/huggingface/`
+- **No interference with other extensions**: Temporary environment variables don't affect global ComfyUI session
+- **Explicit control**: `snapshot_download` with `local_dir` gives precise control over model storage
+- **Follows ComfyUI conventions**: Models stored in proper ComfyUI model directories
+- **Reliable caching**: Models stay in ComfyUI directory and don't get accidentally deleted
