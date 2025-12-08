@@ -24,8 +24,12 @@ comfyUI-TTSS/
 ## Model Directory (ComfyUI Convention)
 ```
 ComfyUI/models/tts/
+├── kokoro/              # Kokoro ONNX models
+│   ├── kokoro-v1.0.onnx # Kokoro ONNX model (~300MB)
+│   └── voices-v1.0.bin  # Kokoro voice data (~300MB)
 ├── reference_audio/     # Voice cloning reference files (.wav, 6+ seconds)
 ├── xtts/                # XTTS-v2 / Auralis models
+├── orpheus/             # Orpheus LLM-based TTS models
 └── voices/              # Custom voice models
 ```
 
@@ -76,6 +80,12 @@ def _synth_orpheus(self, text, output_file, voice):
     from orpheus_cpp import OrpheusCpp
     import numpy as np
     from scipy.io.wavfile import write as wav_write
+    import os
+    
+    # Set model cache to ComfyUI models directory
+    orpheus_models_path = os.path.join(tts_models_path, "orpheus")
+    os.makedirs(orpheus_models_path, exist_ok=True)
+    os.environ["HF_HOME"] = orpheus_models_path
     
     orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)  # GPU enabled
     buffer = []

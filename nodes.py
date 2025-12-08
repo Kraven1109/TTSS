@@ -482,8 +482,10 @@ class TTSSTextToSpeech:
             )
         
         # Model paths in TTS models directory
-        model_path = os.path.join(tts_models_path, "kokoro-v1.0.onnx")
-        voices_path = os.path.join(tts_models_path, "voices-v1.0.bin")
+        kokoro_models_path = os.path.join(tts_models_path, "kokoro")
+        os.makedirs(kokoro_models_path, exist_ok=True)
+        model_path = os.path.join(kokoro_models_path, "kokoro-v1.0.onnx")
+        voices_path = os.path.join(kokoro_models_path, "voices-v1.0.bin")
         
         # Auto-download models if not present
         if not os.path.exists(model_path) or not os.path.exists(voices_path):
@@ -568,6 +570,11 @@ class TTSSTextToSpeech:
         
         import numpy as np
         from scipy.io.wavfile import write as wav_write
+        
+        # Set model cache to ComfyUI models directory (follows ComfyUI convention)
+        orpheus_models_path = os.path.join(tts_models_path, "orpheus")
+        os.makedirs(orpheus_models_path, exist_ok=True)
+        os.environ["HF_HOME"] = orpheus_models_path
         
         # Initialize Orpheus with llama.cpp backend (GPU enabled)
         orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)
