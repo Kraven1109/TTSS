@@ -576,6 +576,10 @@ class TTSSTextToSpeech:
         os.makedirs(orpheus_models_path, exist_ok=True)
         os.environ["HF_HOME"] = orpheus_models_path
         
+        # Suppress ONNX Runtime CUDA warnings for better UX
+        os.environ["ORT_LOG_SEVERITY_LEVEL"] = "2"  # Warning level only
+        os.environ["ORT_DISABLE_CUDA_GRAPH"] = "1"  # Disable CUDA graph warnings
+        
         # Initialize Orpheus with llama.cpp backend (GPU enabled)
         orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)
         

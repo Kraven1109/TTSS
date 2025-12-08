@@ -25,8 +25,6 @@ comfyUI-TTSS/
 ```
 ComfyUI/models/tts/
 ├── kokoro/              # Kokoro ONNX models
-│   ├── kokoro-v1.0.onnx # Kokoro ONNX model (~300MB)
-│   └── voices-v1.0.bin  # Kokoro voice data (~300MB)
 ├── reference_audio/     # Voice cloning reference files (.wav, 6+ seconds)
 ├── xtts/                # XTTS-v2 / Auralis models
 ├── orpheus/             # Orpheus LLM-based TTS models
@@ -86,6 +84,10 @@ def _synth_orpheus(self, text, output_file, voice):
     orpheus_models_path = os.path.join(tts_models_path, "orpheus")
     os.makedirs(orpheus_models_path, exist_ok=True)
     os.environ["HF_HOME"] = orpheus_models_path
+    
+    # Suppress ONNX Runtime CUDA warnings for better UX
+    os.environ["ORT_LOG_SEVERITY_LEVEL"] = "2"  # Warning level only
+    os.environ["ORT_DISABLE_CUDA_GRAPH"] = "1"  # Disable CUDA graph warnings
     
     orpheus = OrpheusCpp(verbose=False, lang="en", n_gpu_layers=-1)  # GPU enabled
     buffer = []
