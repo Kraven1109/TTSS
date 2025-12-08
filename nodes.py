@@ -630,85 +630,100 @@ class TTSSTextToSpeech:
                 os.environ.pop("HUGGINGFACE_HUB_CACHE", None)
     
     def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
-        """Synthesize using CSM (Conversational Speech Model) via llama.cpp.
+        """Synthesize using CSM (Conversational Speech Model) via HuggingFace Transformers.
         
-        Premium conversational TTS with voice cloning capabilities.
-        Uses ggml-org/sesame-csm-1b-GGUF (no login required).
+        Premium conversational TTS (1B params) with speaker control.
+        Uses native HuggingFace Transformers API (v4.52.1+).
+        
+        NOTE: sesame/csm-1b is a GATED model - requires HuggingFace login:
+            huggingface-cli login
         
         Args:
             text: Input text to synthesize
-            output_file: Path to save WAV output
-            speaker_id: Speaker ID (0-9) for voice consistency
+            output_file: Path to save WAV output  
+            speaker_id: Speaker ID (0-9) for voice character
             context_audio: Optional previous audio for conversational continuity
         """
         try:
-            from llama_cpp import Llama
-        except ImportError:
+            import torch
+            import torchaudio
+            from transformers import CsmForConditionalGeneration, AutoProcessor
+        except ImportError as e:
             raise ImportError(
-                "[TTSS] llama-cpp-python not installed.\n"
-                "Install with: pip install llama-cpp-python\n"
-                "For GPU: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124"
+                f"[TTSS] CSM requires: pip install transformers>=4.52.1 torchaudio accelerate\n"
+                f"Missing: {e}"
             )
         
-        # Pre-download CSM model (GGUF format, no login needed)
-        csm_model_repo = "ggml-org/sesame-csm-1b-GGUF"
-        csm_model_path = os.path.join(tts_csm_path, "sesame-csm-1b.gguf")
+        # Check for CUDA (CSM is heavy, GPU strongly recommended)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device == "cpu":
+            print("[TTSS] WARNING: CSM on CPU will be very slow. GPU strongly recommended!")
         
-        if not os.path.exists(csm_model_path):
-            print(f"[TTSS] Downloading CSM model to: {csm_model_path}")
-            from huggingface_hub import snapshot_download
-            snapshot_download(
-                repo_id=csm_model_repo,
-                local_dir=tts_csm_path,
-                local_dir_use_symlinks=False,
+        # Model ID (gated - requires HuggingFace login)
+        model_id = "sesame/csm-1b"
+        
+        print(f"[TTSS] Loading CSM model from {model_id}...")
+        print(f"[TTSS] NOTE: If you get a 401/403 error, run: huggingface-cli login")
+        
+        try:
+            # Load processor and model
+            processor = AutoProcessor.from_pretrained(model_id)
+            model = CsmForConditionalGeneration.from_pretrained(
+                model_id,
+                device_map=device,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
             )
-            # Find the actual model file (GGUF)
-            gguf_files = [f for f in os.listdir(tts_csm_path) if f.endswith('.gguf')]
-            if gguf_files:
-                csm_model_path = os.path.join(tts_csm_path, gguf_files[0])
-            else:
-                raise FileNotFoundError(f"[TTSS] No GGUF file found in {tts_csm_path}")
+        except Exception as e:
+            error_msg = str(e)
+            if "401" in error_msg or "403" in error_msg or "gated" in error_msg.lower():
+                raise RuntimeError(
+                    f"[TTSS] CSM model access denied! This is a GATED model.\n"
+                    f"Please run: huggingface-cli login\n"
+                    f"Then visit https://huggingface.co/sesame/csm-1b and accept the terms.\n"
+                    f"Original error: {e}"
+                )
+            raise
         
-        # Load CSM model with llama.cpp
-        print(f"[TTSS] Loading CSM model: {csm_model_path}")
-        llm = Llama(
-            model_path=csm_model_path,
-            n_gpu_layers=-1,  # Use GPU if available
-            verbose=False,
-            chat_format="csm",  # CSM-specific chat format
-        )
+        # Build conversation with speaker ID
+        # CSM uses [speaker_id] prefix in the text
+        conversation = [
+            {"role": "user", "content": f"[{speaker_id}]{text}"}
+        ]
         
-        # Prepare prompt with speaker
-        prompt = f"[SPEAKER_{speaker_id}] {text}"
+        # If context audio provided, add it as conversation history
+        if context_audio and os.path.exists(context_audio):
+            print(f"[TTSS] Using context audio: {context_audio}")
+            context_waveform, context_sr = torchaudio.load(context_audio)
+            # Resample to 24kHz if needed (CSM uses 24kHz)
+            if context_sr != 24000:
+                resampler = torchaudio.transforms.Resample(context_sr, 24000)
+                context_waveform = resampler(context_waveform)
+            # Add context as previous turn
+            conversation.insert(0, {
+                "role": "assistant", 
+                "content": f"[{speaker_id}]",
+                "audio": context_waveform.squeeze().numpy()
+            })
         
-        # Generate audio tokens
-        print(f"[TTSS] Generating audio with CSM...")
-        output = llm.create_chat_completion(
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1024,  # Audio tokens
-            temperature=0.7,
-        )
+        # Process inputs
+        inputs = processor.apply_chat_template(
+            conversation,
+            tokenize=True,
+            return_tensors="pt",
+        ).to(device)
         
-        # Extract audio data from response
-        # CSM outputs audio tokens that need to be converted to waveform
-        audio_tokens = output["choices"][0]["message"]["content"]
+        # Generate audio
+        print(f"[TTSS] Generating speech with CSM (speaker={speaker_id})...")
+        with torch.no_grad():
+            audio_output = model.generate(
+                **inputs,
+                output_audio=True,
+                max_new_tokens=2048,  # ~85 seconds at 24kHz
+            )
         
-        # Convert tokens to audio (simplified - actual implementation needs CSM decoder)
-        # This is a placeholder - real implementation needs the Mimi decoder
-        # For now, create a dummy audio file
-        import numpy as np
-        from scipy.io.wavfile import write as wav_write
-        
-        # Placeholder: generate silence (replace with actual CSM audio generation)
-        sample_rate = 24000
-        duration = len(text) * 0.1  # Rough estimate
-        audio = np.zeros(int(sample_rate * duration), dtype=np.float32)
-        
-        wav_write(output_file, sample_rate, audio)
-        print(f"[TTSS] CSM synthesis completed (placeholder): {output_file}")
-        
-        # TODO: Implement full CSM audio generation with Mimi decoder
-        # This requires integrating the CSM TTS pipeline from llama.cpp
+        # Save audio (CSM outputs 24kHz)
+        processor.save_audio(audio_output, output_file)
+        print(f"[TTSS] CSM synthesis complete: {output_file}")
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""

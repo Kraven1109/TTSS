@@ -28,11 +28,15 @@ orpheus-cpp                    # Orpheus TTS with llama.cpp backend
 #   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 
 # === CSM (optional - Conversational Speech Model, 1B params) ===
-# Premium conversational TTS with voice cloning
-# Uses llama.cpp backend - no HuggingFace login required!
-# Downloads ggml-org/sesame-csm-1b-GGUF (~96MB) automatically
-llama-cpp-python>=0.3.4       # CSM TTS with llama.cpp backend
-# Install with CUDA: pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+# Premium conversational TTS with conversational context awareness
+# Uses native HuggingFace Transformers API (v4.52.1+)
+# NOTE: sesame/csm-1b is GATED - requires HuggingFace login:
+#   1. huggingface-cli login
+#   2. Visit https://huggingface.co/sesame/csm-1b and accept terms
+# First run downloads ~4GB model automatically
+transformers>=4.52.1          # CSM native support
+torchaudio>=2.0.0             # Audio I/O for CSM
+accelerate>=0.20.0            # Efficient model loading
 
 # Audio processing (pydub requires ffmpeg)
 # Install ffmpeg via: conda install ffmpeg or apt install ffmpeg

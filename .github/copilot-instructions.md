@@ -71,34 +71,35 @@ def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
     sf.write(output_file, samples, sample_rate)
 ```
 
-### CSM TTS (Conversational Speech Model, 1B params, GGUF via llama.cpp)
+### CSM TTS (Conversational Speech Model, 1B params, HuggingFace Transformers)
 ```python
 def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
-    from llama_cpp import Llama
+    import torch
+    import torchaudio
+    from transformers import CsmForConditionalGeneration, AutoProcessor
     
-    # Pre-download ggml-org/sesame-csm-1b-GGUF (no login required)
-    csm_model_path = os.path.join(tts_csm_path, "sesame-csm-1b.gguf")
-    if not os.path.exists(csm_model_path):
-        from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id="ggml-org/sesame-csm-1b-GGUF",
-            local_dir=tts_csm_path,
-            local_dir_use_symlinks=False,
-        )
+    # sesame/csm-1b is GATED - requires HuggingFace login:
+    #   huggingface-cli login
+    #   Then visit https://huggingface.co/sesame/csm-1b and accept terms
+    model_id = "sesame/csm-1b"
     
-    # Load with llama.cpp
-    llm = Llama(model_path=csm_model_path, n_gpu_layers=-1, chat_format="csm")
-    
-    # Generate with conversational context
-    prompt = f"[SPEAKER_{speaker_id}] {text}"
-    output = llm.create_chat_completion(
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1024,
+    processor = AutoProcessor.from_pretrained(model_id)
+    model = CsmForConditionalGeneration.from_pretrained(
+        model_id,
+        device_map="cuda",
+        torch_dtype=torch.float16,
     )
     
-    # Convert audio tokens to WAV (requires Mimi decoder integration)
-    # audio_codes = output["choices"][0]["message"]["content"]
-    # audio = decode_mimi(audio_codes)  # TODO: implement
+    # Build conversation with speaker ID (0-9)
+    conversation = [{"role": "user", "content": f"[{speaker_id}]{text}"}]
+    
+    # Process and generate
+    inputs = processor.apply_chat_template(
+        conversation, tokenize=True, return_tensors="pt"
+    ).to("cuda")
+    
+    audio_output = model.generate(**inputs, output_audio=True, max_new_tokens=2048)
+    processor.save_audio(audio_output, output_file)  # 24kHz WAV
 ```
 
 ### Dynamic Voice Loading
@@ -168,8 +169,8 @@ LoadImage → 🦙 LLama Server → 🔊 Text to Speech → 🎧 Preview Audio
 - edge-tts (Microsoft TTS, 550+ voices)
 - kokoro-onnx (lightweight neural TTS, 82M params, Python 3.10-3.13)
 - orpheus-cpp + llama-cpp-python (SOTA LLM TTS, llama.cpp backend, works on Windows!)
-- llama-cpp-python (CSM conversational TTS, GGUF format, no login required)
-- huggingface_hub (for model downloading, used by Orpheus and CSM pre-download)
+- transformers>=4.52.1 + torchaudio (CSM conversational TTS, requires HuggingFace login)
+- huggingface_hub (for model downloading, used by Orpheus pre-download)
 
 ## Engine Comparison
 
