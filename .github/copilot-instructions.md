@@ -83,9 +83,19 @@ def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
     #   Then visit https://huggingface.co/sesame/csm-1b and accept terms
     model_id = "sesame/csm-1b"
     
-    processor = AutoProcessor.from_pretrained(model_id)
+    # Download to ComfyUI models directory (not user cache)
+    local_model_path = os.path.join(tts_csm_path, model_id.replace("/", "_"))
+    if not os.path.exists(local_model_path):
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=local_model_path,
+            local_dir_use_symlinks=False,
+        )
+    
+    processor = AutoProcessor.from_pretrained(local_model_path)
     model = CsmForConditionalGeneration.from_pretrained(
-        model_id,
+        local_model_path,
         device_map="cuda",
         dtype=torch.float16,
     )
@@ -103,6 +113,34 @@ def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
     audio_output = model.generate(**inputs, output_audio=True, max_new_tokens=2048)
     processor.save_audio(audio_output, output_file)  # 24kHz WAV
 ```
+
+### CSM Emotional / Expressive Tags
+CSM supports emotional and expressive control through text prompts. While not fully documented, the model can interpret tags for:
+
+**Emotion:** happy, sad, angry, empathetic, excited, calm, warm, cold, harsh, soft
+
+**Style:** formal, casual, storytelling, dramatic, energetic, reassuring
+
+**Expressiveness:** whispering, shouting, enthusiastic, thoughtful, confident
+
+**Examples:**
+- `[0]I'm so excited to meet you!` - enthusiastic tone
+- `[1]I understand how you feel.` - empathetic, warm tone  
+- `[2]This is unacceptable!` - angry, harsh tone
+- `[3]Let me tell you a story...` - storytelling, dramatic style
+
+**Note:** Emotional control is achieved through natural language prompts rather than explicit tags. The model learns emotional context from conversational patterns.
+
+### HuggingFace Token Permissions for Gated Models
+Even if you've run `huggingface-cli login`, your access token may not have the right permissions for gated models like `sesame/csm-1b`.
+
+**Problem:** By default, fine-grained tokens can be restricted (e.g., only read/write to certain repos). If "Access to public gated repos" is not enabled, you'll get a 403 error.
+
+**Solution:**
+1. Go to [Hugging Face Settings → Access Tokens](https://huggingface.co/settings/tokens)
+2. Edit or create a new token
+3. Make sure **"Access to gated repositories"** is enabled
+4. The token needs this permission to access models that require agreement acceptance
 
 ### Dynamic Voice Loading
 ```python

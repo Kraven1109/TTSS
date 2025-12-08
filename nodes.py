@@ -638,6 +638,21 @@ class TTSSTextToSpeech:
         NOTE: sesame/csm-1b is a GATED model - requires HuggingFace login:
             huggingface-cli login
         
+        Emotional/Expressive Tags:
+        CSM supports emotional control through text prompts:
+        - Emotion: happy, sad, angry, empathetic, excited, calm, warm, cold, harsh, soft
+        - Style: formal, casual, storytelling, dramatic, energetic, reassuring  
+        - Expressiveness: whispering, shouting, enthusiastic, thoughtful, confident
+        
+        Examples:
+        - "[0]I'm so excited to meet you!" - enthusiastic tone
+        - "[1]I understand how you feel." - empathetic, warm tone
+        - "[2]This is unacceptable!" - angry, harsh tone
+        
+        HuggingFace Token Permissions:
+        Even if you've run 'huggingface-cli login', your token may not have access to gated repos.
+        Go to https://huggingface.co/settings/tokens and enable "Access to gated repositories".
+        
         Args:
             text: Input text to synthesize
             output_file: Path to save WAV output  
@@ -665,11 +680,23 @@ class TTSSTextToSpeech:
         print(f"[TTSS] Loading CSM model from {model_id}...")
         print(f"[TTSS] NOTE: If you get a 401/403 error, run: huggingface-cli login")
         
+        # Download model to ComfyUI directory (not user cache)
+        local_model_path = os.path.join(tts_csm_path, model_id.replace("/", "_"))
+        if not os.path.exists(local_model_path):
+            print(f"[TTSS] Downloading CSM model to: {local_model_path}")
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id=model_id,
+                local_dir=local_model_path,
+                local_dir_use_symlinks=False,
+            )
+            print(f"[TTSS] CSM model downloaded successfully")
+        
         try:
-            # Load processor and model
-            processor = AutoProcessor.from_pretrained(model_id)
+            # Load processor and model from local path
+            processor = AutoProcessor.from_pretrained(local_model_path)
             model = CsmForConditionalGeneration.from_pretrained(
-                model_id,
+                local_model_path,
                 device_map=device,
                 dtype=torch.float16 if device == "cuda" else torch.float32,
             )
