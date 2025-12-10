@@ -155,9 +155,24 @@ def synth_csm(text, output_file, speaker_id, context_audio,
                 pass
 
 
-def synth_csm_conversation(conversation, output_file, model_manager, 
-                          tts_csm_path, csm_model_id):
-    """Synthesize conversation using CSM with multiple speakers."""
+def synth_csm_conversation(conversation_text, output_file, speaker_voice_map, 
+                          context_audio, max_speakers, model_manager, 
+                          tts_csm_path, csm_model_id, output_path):
+    """Synthesize conversation using CSM with multiple speakers.
+    
+    Args:
+        conversation_text: Text with speaker tags like "[0] Hello" 
+        output_file: Path to save output audio
+        speaker_voice_map: Dict mapping speaker IDs to voice IDs
+        context_audio: Optional path to context audio file
+        max_speakers: Maximum number of speakers to process
+        model_manager: Model manager for caching
+        tts_csm_path: Path to CSM models directory
+        csm_model_id: Model repository ID
+        output_path: Output directory for temporary files
+    """
+    import re
+    import time
     
     try:
         import torch
@@ -168,6 +183,27 @@ def synth_csm_conversation(conversation, output_file, model_manager,
             f"[TTSS] CSM requires: pip install transformers>=4.52.1 torchaudio accelerate\n"
             f"Missing: {e}"
         )
+    
+    # Parse conversation text
+    lines = [line.strip() for line in conversation_text.split('\n') if line.strip()]
+    conversation_turns = []
+    
+    for line in lines:
+        # Parse speaker tags like [0], [1], etc.
+        match = re.match(r'^\[(\d+)\]\s*(.+)$', line)
+        if match:
+            speaker_id = int(match.group(1))
+            text = match.group(2).strip()
+            if speaker_id < max_speakers:  # Only process speakers within max_speakers
+                conversation_turns.append({
+                    'speaker': speaker_id,
+                    'text': text
+                })
+    
+    if not conversation_turns:
+        raise ValueError("[TTSS] No valid conversation turns found. Use format: [0] Speaker text")
+    
+    print(f"[TTSS] Processing {len(conversation_turns)} conversation turns")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cpu":
@@ -204,30 +240,75 @@ def synth_csm_conversation(conversation, output_file, model_manager,
             )
         raise
     
-    # Process conversation
-    inputs = processor.apply_chat_template(
-        conversation,
-        tokenize=True,
-        return_dict=True,
-    ).to(device)
+    # Build conversation for CSM
+    conversation = []
+    tmp_context_path = None
     
-    print(f"[TTSS] Generating conversation with {len(conversation)} turns...")
-    with torch.no_grad():
-        audio_output = model.generate(
-            **inputs,
-            output_audio=True,
-            max_new_tokens=2048 * len(conversation),  # Scale with conversation length
-        )
+    try:
+        # Add context audio if provided
+        if context_audio and os.path.exists(context_audio):
+            print(f"[TTSS] Using context audio: {context_audio}")
+            context_waveform, context_sr = torchaudio.load(context_audio)
+            # Resample to 24kHz if needed
+            audio_to_pass = context_audio
+            if context_sr != 24000:
+                resampler = torchaudio.transforms.Resample(context_sr, 24000)
+                context_waveform = resampler(context_waveform)
+                # Save resampled audio to temporary file
+                tmp_context_path = os.path.join(output_path, f"ttss_context_{int(time.time())}.wav")
+                torchaudio.save(tmp_context_path, context_waveform, 24000)
+                audio_to_pass = tmp_context_path
+            # Add as previous turn
+            conversation.append({
+                "role": "0",  # Default context speaker
+                "content": [
+                    {"type": "text", "text": ""},
+                    {"type": "audio", "path": audio_to_pass}
+                ]
+            })
+        
+        # Add conversation turns
+        for turn in conversation_turns:
+            speaker_id = turn['speaker']
+            voice_id = speaker_voice_map.get(speaker_id, str(speaker_id))
+            
+            conversation.append({
+                "role": voice_id,
+                "content": [{"type": "text", "text": turn['text']}]
+            })
+        
+        # Process conversation
+        inputs = processor.apply_chat_template(
+            conversation,
+            tokenize=True,
+            return_dict=True,
+        ).to(device)
+        
+        print(f"[TTSS] Generating conversation with {len(conversation)} turns...")
+        with torch.no_grad():
+            audio_output = model.generate(
+                **inputs,
+                output_audio=True,
+                max_new_tokens=2048 * len(conversation),  # Scale with conversation length
+            )
+        
+        # Save audio
+        processor.save_audio(audio_output, output_file)
+        print(f"[TTSS] Conversation synthesis complete: {output_file}")
     
-    # Save audio
-    processor.save_audio(audio_output, output_file)
-    print(f"[TTSS] Conversation synthesis complete: {output_file}")
-    
-    # Always unload CSM after use
-    effective_keep = False
-    # Unload model to free resources
-    if not effective_keep:
-        try:
-            model_manager.unload_csm(local_model_path, device)
-        except Exception:
-            pass
+    finally:
+        # Clean up temporary context audio file
+        if tmp_context_path and os.path.exists(tmp_context_path):
+            try:
+                os.remove(tmp_context_path)
+            except Exception:
+                print(f"[TTSS] Warning: Could not remove temp file {tmp_context_path}")
+        
+        # Always unload CSM after use
+        effective_keep = False
+        # Unload model to free resources
+        if not effective_keep:
+            try:
+                model_manager.unload_csm(local_model_path, device)
+            except Exception:
+                pass

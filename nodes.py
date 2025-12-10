@@ -979,32 +979,15 @@ class TTSConversation:
                             speaker_2_voice="2", speaker_3_voice="3", context_audio=None, max_speakers=2):
         """Generate multi-speaker conversation audio using CSM."""
         
-        # Parse conversation text
-        lines = [line.strip() for line in conversation_text.split('\n') if line.strip()]
-        conversation_turns = []
+        # Validate input
+        if not conversation_text or not conversation_text.strip():
+            raise ValueError("[TTSS] No conversation text provided")
         
-        for line in lines:
-            # Parse speaker tags like [0], [1], etc.
-            import re
-            match = re.match(r'^\[(\d+)\]\s*(.+)$', line)
-            if match:
-                speaker_id = int(match.group(1))
-                text = match.group(2).strip()
-                if speaker_id < max_speakers:  # Only process speakers within max_speakers
-                    # Validator warns if inline Orpheus tags are mixed into a CSM conversation
-                    try:
-                        validate_orpheus_tag_usage('csm', text)
-                    except Exception:
-                        pass
-                    conversation_turns.append({
-                        'speaker': speaker_id,
-                        'text': text
-                    })
-        
-        if not conversation_turns:
-            raise ValueError("[TTSS] No valid conversation turns found. Use format: [0] Speaker text")
-        
-        print(f"[TTSS] Processing {len(conversation_turns)} conversation turns")
+        # Validator warns if inline Orpheus tags are mixed into a CSM conversation
+        try:
+            validate_orpheus_tag_usage('csm', conversation_text)
+        except Exception:
+            pass
         
         # Map speaker IDs to voice IDs
         speaker_voice_map = {
@@ -1014,63 +997,21 @@ class TTSConversation:
             3: speaker_3_voice,
         }
         
-        # Build conversation for CSM
-        conversation = []
-        
-        # Add context audio if provided
-        if context_audio and os.path.exists(context_audio):
-            print(f"[TTSS] Using context audio: {context_audio}")
-            import torchaudio
-            context_waveform, context_sr = torchaudio.load(context_audio)
-            # Resample to 24kHz if needed
-            audio_to_pass = context_audio
-            if context_sr != 24000:
-                import torch
-                resampler = torchaudio.transforms.Resample(context_sr, 24000)
-                context_waveform = resampler(context_waveform)
-                # Save resampled audio to temporary file
-                tmp_context_path = os.path.join(output_path, f"ttss_context_{int(time.time())}.wav")
-                torchaudio.save(tmp_context_path, context_waveform, 24000)
-                audio_to_pass = tmp_context_path
-            # Add as previous turn
-            conversation.append({
-                "role": "0",  # Default context speaker
-                "content": [
-                    {"type": "text", "text": ""},
-                    {"type": "audio", "path": audio_to_pass}
-                ]
-            })
-        
-        # Add conversation turns
-        for turn in conversation_turns:
-            speaker_id = turn['speaker']
-            voice_id = speaker_voice_map.get(speaker_id, str(speaker_id))
-            
-            conversation.append({
-                "role": voice_id,
-                "content": [{"type": "text", "text": turn['text']}]
-            })
-        
         # Generate unique filename
         import hashlib
-        import time
         text_hash = hashlib.md5(conversation_text.encode()).hexdigest()[:8]
         timestamp = int(time.time())
         output_file = os.path.join(output_path, f"ttss_conversation_{timestamp}_{text_hash}.wav")
         
-        # Use CSM synthesis
-        self._synth_csm_conversation(conversation, output_file)
+        # Call CSM engine function
+        engines.synth_csm_conversation(
+            conversation_text, output_file, speaker_voice_map,
+            context_audio, max_speakers,
+            MODEL_MANAGER, tts_csm_path, CSM_MODEL_ID, output_path
+        )
         
         print(f"[TTSS] Conversation generated: {output_file}")
         return (output_file,)
-    
-    def _synth_csm_conversation(self, conversation, output_file):
-        """Synthesize conversation using CSM with multiple speakers."""
-        # Call engine function
-        engines.synth_csm_conversation(
-            conversation, output_file, 
-            MODEL_MANAGER, tts_csm_path, CSM_MODEL_ID
-        )
 
 
 # =============================================================================
