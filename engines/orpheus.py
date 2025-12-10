@@ -113,7 +113,7 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
     # Load SNAC Decoder
     try:
         snac_device = device if device == "cuda" else "cpu"
-        snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").to(snac_device)
+        snac_model = SNAC.from_pretrained(snac_repo_id).to(snac_device)
     except Exception as e:
         raise RuntimeError(f"[TTSS] Failed to load SNAC decoder: {e}")
 
@@ -195,53 +195,49 @@ def _extract_snac_codes(decoded_text):
     Extract SNAC codes from the decoded model output.
     
     The Orpheus model outputs SNAC codes in a specific format within the text.
-    This function parses that format and returns the codes as a list.
+    SNAC expects shape: [num_hierarchies, sequence_length]
     
     Args:
         decoded_text: The decoded text from the model
         
     Returns:
-        List of SNAC codes or None if extraction failed
+        numpy array of SNAC codes with shape [num_hierarchies, sequence_length] or None if extraction failed
     """
+    import numpy as np
+    
     # Look for SNAC code patterns in the decoded text
     # Pattern 1: [code1,code2,code3][code4,code5,code6]...
+    # Each bracket contains codes for one time frame across all hierarchies
     pattern1 = r'\[([^\]]+)\]'
     matches = re.findall(pattern1, decoded_text)
     
     if matches:
         try:
-            # Parse each group of codes
-            all_codes = []
+            # Parse each group of codes (each match is one time frame)
+            all_frames = []
             for match in matches:
-                codes = [int(c.strip()) for c in match.split(',') if c.strip().isdigit()]
+                codes = [int(c.strip()) for c in match.split(',') if c.strip().replace('-', '').isdigit()]
                 if codes:
-                    all_codes.append(codes)
+                    all_frames.append(codes)
             
-            if all_codes:
-                # Transpose to get the right shape for SNAC
-                # SNAC expects [num_hierarchies, sequence_length]
-                max_len = max(len(c) for c in all_codes)
-                padded_codes = []
-                for codes in all_codes:
-                    # Pad if needed
-                    padded = codes + [0] * (max_len - len(codes))
-                    padded_codes.append(padded)
+            if all_frames:
+                # Convert to numpy array: [sequence_length, num_hierarchies]
+                frames_array = np.array(all_frames)
                 
-                # Transpose
-                snac_array = np.array(padded_codes).T
-                return snac_array.tolist()
+                # Transpose to get [num_hierarchies, sequence_length] as expected by SNAC
+                snac_array = frames_array.T
+                return snac_array
         except Exception as e:
             print(f"[TTSS] Warning: Failed to parse SNAC codes: {e}")
     
-    # Pattern 2: Look for continuous digit sequences
-    # This is a fallback if the above pattern doesn't match
+    # Pattern 2: Look for continuous digit sequences as fallback
     pattern2 = r'<\|audio\|>.*?<\|eot_id\|>'
     audio_section = re.search(pattern2, decoded_text, re.DOTALL)
     
     if audio_section:
         audio_text = audio_section.group(0)
         # Try to extract numbers from the audio section
-        numbers = re.findall(r'\d+', audio_text)
+        numbers = re.findall(r'-?\d+', audio_text)
         if numbers:
             try:
                 codes = [int(n) for n in numbers]
@@ -249,11 +245,13 @@ def _extract_snac_codes(decoded_text):
                 num_hierarchies = 7
                 num_frames = len(codes) // num_hierarchies
                 if num_frames > 0:
-                    snac_codes = np.array(codes[:num_frames * num_hierarchies]).reshape(num_frames, num_hierarchies)
-                    return snac_codes.tolist()
+                    # Reshape to [num_frames, num_hierarchies] then transpose to [num_hierarchies, num_frames]
+                    snac_codes = np.array(codes[:num_frames * num_hierarchies]).reshape(num_frames, num_hierarchies).T
+                    return snac_codes
             except Exception as e:
                 print(f"[TTSS] Warning: Fallback SNAC extraction failed: {e}")
     
     print("[TTSS] Warning: Could not extract SNAC codes from model output")
     return None
+
 
