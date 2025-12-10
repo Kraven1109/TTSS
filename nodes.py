@@ -283,31 +283,6 @@ class ModelManager:
 MODEL_MANAGER = ModelManager()
 
 
-class TTSSSettings:
-    """Node to control global TTSS settings like keeping models loaded across runs."""
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "optional": {
-                "keep_models": ("BOOL", {"default": False, "tooltip": "Keep models in memory after synthesis for faster subsequent runs (uses more RAM/GPU)"}),
-                "csm_minimal_download": ("BOOL", {"default": False, "tooltip": "When True, download only a minimal subset of files for the CSM model to save disk space (may miss optional helper files)"}),
-                "csm_cleanup_after_download": ("BOOL", {"default": False, "tooltip": "When True, delete non-essential files (e.g., .cache) from the local CSM model folder after download to free disk space"}),
-            }
-        }
-
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("status",)
-    FUNCTION = "set_settings"
-    CATEGORY = "🔊 TTSS"
-
-    def set_settings(self, keep_models=False, csm_minimal_download=False, csm_cleanup_after_download=False):
-        MODEL_MANAGER.keep_models_default = bool(keep_models)
-        MODEL_MANAGER.csm_minimal_download_default = bool(csm_minimal_download)
-        MODEL_MANAGER.csm_cleanup_after_download_default = bool(csm_cleanup_after_download)
-        # Note: Keep the defaults off to avoid missing optional files unless user opts in
-        status = (f"Keep models: {MODEL_MANAGER.keep_models_default}; CSM minimal download: {MODEL_MANAGER.csm_minimal_download_default}; "
-                 f"CSM cleanup: {MODEL_MANAGER.csm_cleanup_after_download_default}")
-        print(f"[TTSS] {status}")
 def get_pyttsx3_voices():
     """Get available pyttsx3 system voices."""
     try:
@@ -477,6 +452,8 @@ class TTSSTextToSpeech:
                     "max": 2.0,
                     "step": 0.1
                 }),
+                "keep_models": ("BOOL", {"default": False, "tooltip": "Keep models in memory after synthesis for faster subsequent runs (uses more RAM/GPU)"}),
+                "show_orpheus_help": ("BOOL", {"default": False, "tooltip": "Show Orpheus inline tags & descriptors in logs and warnings"}),
                 # Voice dropdowns for each engine
                 "edge_voice": (edge_voices, {"default": "en-US-AriaNeural"}),
                 "pyttsx3_voice": (pyttsx3_voices, {"default": pyttsx3_voices[0] if pyttsx3_voices else "default"}),
@@ -490,7 +467,6 @@ class TTSSTextToSpeech:
                 "text_input": ("STRING", {"forceInput": True, "multiline": True}),
                 "srt_input": ("SRT",),
                 "context_audio": ("AUDIOPATH",),  # For CSM conversational context
-                "show_orpheus_help": ("BOOL", {"default": False, "tooltip": "Show Orpheus inline tags & descriptors in logs and warnings"}),
             }
         }
     
@@ -503,7 +479,7 @@ class TTSSTextToSpeech:
                    pyttsx3_voice="default", edge_voice="en-US-AriaNeural",
                    kokoro_voice="af_heart", kokoro_lang="a",
                    orpheus_lang="English", orpheus_voice="en_tara", csm_voice="0",
-                   text_input=None, srt_input=None, context_audio=None, show_orpheus_help=False):
+                   text_input=None, srt_input=None, context_audio=None, show_orpheus_help=False, keep_models=False):
         """Generate speech from text using selected engine."""
         
         # Build final text
@@ -551,9 +527,9 @@ class TTSSTextToSpeech:
             elif engine == "edge-tts":
                 self._synth_edge_tts(final_text, output_file, voice_name, speed)
             elif engine == "kokoro":
-                self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed, keep_models=False)
+                self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed, keep_models)
             elif engine == "orpheus":
-                self._synth_orpheus(final_text, output_file, orpheus_lang, voice_name, keep_models=False)
+                self._synth_orpheus(final_text, output_file, orpheus_lang, voice_name, keep_models)
             elif engine == "csm":
                 self._synth_csm(final_text, output_file, voice_name, context_audio)
             else:

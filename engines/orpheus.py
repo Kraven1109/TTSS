@@ -223,7 +223,7 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
         wav_write(output_file, sample_rate, int_audio)
     
     # Decide per-node keep vs global default
-    effective_keep = bool(keep_models) or getattr(model_manager, 'keep_models_default', False)
+    effective_keep = keep_models
     # Unload the orpheus instance if configured to not keep models loaded
     if not effective_keep:
         try:

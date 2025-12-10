@@ -187,7 +187,7 @@ def synth_kokoro(text, output_file, voice, lang_code, speed, keep_models,
     sf.write(output_file, final_audio, sample_rate)
     
     # Decide final keep_models policy (per-node overrides global)
-    effective_keep = bool(keep_models) or getattr(model_manager, 'keep_models_default', False)
+    effective_keep = keep_models
     # Unload Kokoro if not expected to keep the model
     if not effective_keep:
         try:
