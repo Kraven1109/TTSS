@@ -87,8 +87,14 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
             )
         FastLanguageModel.for_inference(model)
         print("[TTSS] Loaded with Unsloth acceleration")
-    except ImportError:
-        print("[TTSS] Unsloth not found, using standard Transformers...")
+    except (ImportError, Exception) as e:
+        # ImportError: Unsloth not installed
+        # Other exceptions: Unsloth failed to load model
+        if not isinstance(e, ImportError):
+            print(f"[TTSS] Unsloth failed ({e}), falling back to standard Transformers...")
+        else:
+            print("[TTSS] Unsloth not found, using standard Transformers...")
+        model = None
     
     # Fall back to standard Transformers if Unsloth failed
     if model is None:
@@ -119,7 +125,19 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
 
     # Format Prompt (CRITICAL - Orpheus expects this exact format)
     prompt = f"<|audio|>{voice}: {text}<|eot_id|>"
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    
+    # Tokenize - when using device_map="auto", the model handles device placement
+    # So we don't manually move inputs to a specific device
+    if hasattr(model, 'device'):
+        # Model is on a specific device
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    else:
+        # Model uses device_map, let it handle placement
+        inputs = tokenizer(prompt, return_tensors="pt")
+        # Move to first available device if model has multiple devices
+        if hasattr(model, 'hf_device_map') and model.hf_device_map:
+            first_device = list(model.hf_device_map.values())[0]
+            inputs = inputs.to(first_device)
 
     # Generate Tokens
     print("[TTSS] Generating Orpheus tokens...")
