@@ -20,6 +20,13 @@ import threading
 import shutil
 import tempfile
 
+# Import TTS engine functions
+try:
+    from . import engines
+except ImportError:
+    # Fallback for direct import (not as package)
+    import engines
+
 try:
     import folder_paths
     COMFYUI_AVAILABLE = True
@@ -145,26 +152,6 @@ ORPHEUS_MODELS = {
     "Mandarin": "freddyaboulton/3b-zh-ft-research_release-Q4_K_M-GGUF",
     "Korean": "freddyaboulton/3b-ko-ft-research_release-Q4_K_M-GGUF",
 }
-
-def _get_edge_tts_cli():
-    """Find edge-tts CLI executable path using system path."""
-    # Check system PATH first
-    if shutil.which("edge-tts"):
-        return "edge-tts"
-        
-    # Fallback: Check Scripts folder in current Python environment
-    import sys
-    python_dir = os.path.dirname(sys.executable)
-    scripts_dir = os.path.join(python_dir, "Scripts")
-    
-    # Check for .exe (Windows) or no extension (Linux/Mac)
-    for ext in [".exe", ""]:
-        edge_path = os.path.join(scripts_dir, "edge-tts" + ext)
-        if os.path.exists(edge_path):
-            return edge_path
-            
-    # Final fallback
-    return "edge-tts"
 
 
 # =============================================================================
@@ -608,93 +595,19 @@ class TTSSTextToSpeech:
 
     def _synth_pyttsx3(self, text, output_file, voice_name, speed):
         """Synthesize using pyttsx3 (offline system voices)."""
-        import pyttsx3
-        
         # Strip Orpheus-specific emotion tags (not supported by pyttsx3)
         text = self._strip_emotion_tags(text)
         
-        engine = pyttsx3.init()
-        
-        # Set speed
-        default_rate = engine.getProperty('rate')
-        engine.setProperty('rate', int(default_rate * speed))
-        
-        # Set voice
-        if voice_name:
-            voices = engine.getProperty('voices')
-            for v in voices:
-                if voice_name.lower() in v.name.lower():
-                    engine.setProperty('voice', v.id)
-                    break
-        
-        engine.save_to_file(text, output_file)
-        engine.runAndWait()
-        engine.stop()
+        # Call engine function
+        engines.synth_pyttsx3(text, output_file, voice_name, speed)
     
     def _synth_edge_tts(self, text, output_file, voice_name, speed):
         """Synthesize using Microsoft Edge TTS via CLI (avoids async issues)."""
-        voice = voice_name if voice_name else "en-US-AriaNeural"
-        
         # Strip Orpheus-specific emotion tags (not supported by edge-tts)
         text = self._strip_emotion_tags(text)
         
-        # Use edge-tts CLI to avoid asyncio conflicts with ComfyUI
-        edge_tts_cmd = _get_edge_tts_cli()
-        cmd = [
-            edge_tts_cmd,
-            '--voice', voice,
-            '--text', text,
-            '--write-media', output_file
-        ]
-        
-        # Only add --rate if speed is not 1.0
-        if speed != 1.0:
-            rate_percent = int((speed - 1) * 100)
-            rate = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
-            cmd.extend(['--rate', rate])
-        
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode != 0:
-                raise RuntimeError(f"edge-tts failed: {result.stderr}")
-        except FileNotFoundError:
-            # edge-tts CLI not in PATH, try Python API with thread
-            self._synth_edge_tts_threaded(text, output_file, voice, speed)
-    
-    def _synth_edge_tts_threaded(self, text, output_file, voice, speed):
-        """Fallback: Run edge-tts in a separate thread to avoid async conflicts."""
-        import asyncio
-        import edge_tts
-        
-        # Calculate rate string for edge_tts API
-        if speed != 1.0:
-            rate_percent = int((speed - 1) * 100)
-            rate = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
-        else:
-            rate = "+0%"
-        
-        result_holder = {'error': None}
-        
-        def run_in_thread():
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                async def synth():
-                    communicate = edge_tts.Communicate(text, voice, rate=rate)
-                    await communicate.save(output_file)
-                
-                loop.run_until_complete(synth())
-                loop.close()
-            except Exception as e:
-                result_holder['error'] = e
-        
-        thread = threading.Thread(target=run_in_thread)
-        thread.start()
-        thread.join(timeout=300)  # 5 minute timeout
-        
-        if result_holder['error']:
-            raise result_holder['error']
+        # Call engine function
+        engines.synth_edge_tts(text, output_file, voice_name, speed)
     
     def _synth_kokoro(self, text, output_file, voice, lang_code, speed, keep_models: bool = False):
         """Synthesize using Kokoro TTS via ONNX Runtime (lightweight 82M neural TTS).
@@ -705,222 +618,11 @@ class TTSSTextToSpeech:
         # Strip Orpheus-specific emotion tags (not supported by Kokoro)
         text = self._strip_emotion_tags(text)
         
-        try:
-            import numpy as np
-            from kokoro_onnx import Kokoro
-            import soundfile as sf
-        except ImportError:
-            raise ImportError(
-                "[TTSS] kokoro-onnx not installed. Run: pip install kokoro-onnx soundfile\n"
-                "Note: First run will download ~300MB model (or ~80MB quantized)."
-            )
-        
-        # Model paths in TTS models directory
-        kokoro_models_path = os.path.join(tts_models_path, "kokoro")
-        os.makedirs(kokoro_models_path, exist_ok=True)
-        model_path = os.path.join(kokoro_models_path, "kokoro-v1.0.onnx")
-        voices_path = os.path.join(kokoro_models_path, "voices-v1.0.bin")
-        
-        # Auto-download models if not present
-        if not os.path.exists(model_path) or not os.path.exists(voices_path):
-            print("[TTSS] Downloading Kokoro ONNX models (~300MB)...")
-            self._download_kokoro_models(model_path, voices_path)
-        
-        # Map lang_code to kokoro-onnx lang format
-        lang_map = {
-            "a": "en-us",  # American English
-            "b": "en-gb",  # British English
-            "e": "es",     # Spanish
-            "f": "fr-fr",  # French
-            "h": "hi",     # Hindi
-            "i": "it",     # Italian
-            "j": "ja",     # Japanese
-            "p": "pt-br",  # Brazilian Portuguese
-            "z": "zh",     # Mandarin Chinese
-        }
-        lang = lang_map.get(lang_code, "en-us")
-        
-        # Initialize Kokoro with ONNX model (possibly cached)
-        kokoro = MODEL_MANAGER.get_kokoro(model_path, voices_path)
-        
-        # Long-form audio processing for Kokoro (phoneme limit ~510)
-        import re
-        
-        # Split text into sentences (handle common sentence endings)
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        sentences = [s.strip() for s in sentences if s.strip()]
-        
-        # Estimate phoneme count (rough approximation: ~1.5 phonemes per character for English)
-        # Kokoro has a hard limit of ~510 phonemes
-        max_phonemes_per_chunk = 400  # Conservative limit to avoid truncation
-        
-        # If text is short, process as single chunk
-        if len(sentences) <= 1 or len(text) < 200:
-            text_chunks = [text]
-        else:
-            # Group sentences into chunks based on estimated phoneme count
-            text_chunks = []
-            current_chunk = ""
-            
-            for sentence in sentences:
-                # Rough phoneme estimation
-                estimated_phonemes = len(current_chunk + sentence) * 1.5
-                
-                if estimated_phonemes < max_phonemes_per_chunk:
-                    current_chunk += sentence + " "
-                else:
-                    if current_chunk:
-                        text_chunks.append(current_chunk.strip())
-                    current_chunk = sentence + " "
-            
-            if current_chunk:
-                text_chunks.append(current_chunk.strip())
-        
-        print(f"[TTSS] Processing {len(text_chunks)} text chunks for Kokoro")
-        
-        # Process each chunk and collect audio
-        all_audio_chunks = []
-        sample_rate = None
-        
-        # Helper to process Kokoro text safely by recursively splitting when phoneme limits are hit
-        def _process_kokoro_chunk(text_to_process):
-            try:
-                return kokoro.create(text_to_process, voice=voice, speed=speed, lang=lang)
-            except Exception as ke:
-                em = str(ke).lower()
-                if ("index" in em and "out of bounds" in em) or ("phoneme" in em) or ("truncat" in em):
-                    words = text_to_process.split()
-                    if len(words) <= 3:
-                        raise
-                    mid = len(words) // 2
-                    left = " ".join(words[:mid]).strip()
-                    right = " ".join(words[mid:]).strip()
-                    left_res = _process_kokoro_chunk(left)
-                    right_res = _process_kokoro_chunk(right)
-                    # left_res and right_res are tuples (samples, sr)
-                    left_samps, left_sr = left_res
-                    right_samps, right_sr = right_res
-                    if left_sr != right_sr:
-                        # Resample right_samps to left_sr if needed (optional, torchaudio)
-                        try:
-                            import torchaudio
-                            import torch
-                            resampler = torchaudio.transforms.Resample(right_sr, left_sr)
-                            right_samps = resampler(torch.tensor(right_samps)).numpy()
-                            right_sr = left_sr
-                        except Exception:
-                            pass
-                    return (np.concatenate([left_samps, right_samps], axis=0), left_sr)
-                else:
-                    raise
-
-        for i, chunk_text in enumerate(text_chunks):
-            print(f"[TTSS] Processing Kokoro chunk {i+1}/{len(text_chunks)}: {chunk_text[:50]}...")
-            
-            try:
-                # Generate speech for this chunk using safe helper
-                samples, sr = _process_kokoro_chunk(chunk_text)
-                
-                if sample_rate is None:
-                    sample_rate = sr
-                
-                # Convert to numpy array and ensure samples is 1D
-                samples = np.asarray(samples)
-                if samples.ndim > 1:
-                    samples = samples.flatten()
-                
-                all_audio_chunks.append(samples)
-                
-            except Exception as e:
-                error_msg = str(e)
-                if "index" in error_msg.lower() and "out of bounds" in error_msg.lower():
-                    print(f"[TTSS] Chunk too long, splitting further: {chunk_text[:30]}...")
-                    # If still too long, split this chunk into smaller pieces
-                    words = chunk_text.split()
-                    sub_chunks = []
-                    current_sub = ""
-                    
-                    for word in words:
-                        if len(current_sub + word) * 1.5 < max_phonemes_per_chunk / 2:
-                            current_sub += word + " "
-                        else:
-                            if current_sub:
-                                sub_chunks.append(current_sub.strip())
-                            current_sub = word + " "
-                    
-                    if current_sub:
-                        sub_chunks.append(current_sub.strip())
-                    
-                    # Process sub-chunks
-                    for sub_chunk in sub_chunks:
-                        try:
-                            sub_samples, sub_sr = kokoro.create(sub_chunk, voice=voice, speed=speed, lang=lang)
-                            # Ensure numpy array and flatten
-                            sub_samples = np.asarray(sub_samples)
-                            if sub_samples.ndim > 1:
-                                sub_samples = sub_samples.flatten()
-                            all_audio_chunks.append(sub_samples)
-                        except Exception as sub_e:
-                            print(f"[TTSS] Skipping problematic sub-chunk: {sub_e}")
-                            continue
-                else:
-                    print(f"[TTSS] Skipping problematic chunk: {e}")
-                    continue
-        
-        # Concatenate all audio chunks
-        if all_audio_chunks:
-            # Simple concatenation (Kokoro outputs are already properly formatted)
-            final_audio = np.concatenate(all_audio_chunks, axis=0)
-        else:
-            raise RuntimeError("[TTSS] Kokoro generated no audio")
-        
-        # Save audio
-        sf.write(output_file, final_audio, sample_rate)
-        # Decide final keep_models policy (per-node overrides global)
-        effective_keep = bool(keep_models) or getattr(MODEL_MANAGER, 'keep_models_default', False)
-        # Unload Kokoro if not expected to keep the model
-        if not effective_keep:
-            try:
-                MODEL_MANAGER.unload_kokoro(model_path, voices_path)
-            except Exception:
-                pass
-    
-    def _download_kokoro_models(self, model_path, voices_path):
-        """Download Kokoro ONNX model files using HuggingFace Hub."""
-        try:
-            from huggingface_hub import hf_hub_download
-        except ImportError:
-            raise ImportError(
-                "[TTSS] huggingface_hub not installed. Run: pip install huggingface-hub"
-            )
-        
-        repo_id = KOKORO_REPO_ID
-        
-        # Download model file
-        if not os.path.exists(model_path):
-            print(f"[TTSS] Downloading kokoro-v1.0.onnx...")
-            downloaded_model = hf_hub_download(
-                repo_id=repo_id,
-                filename="onnx/kokoro-v1.0.onnx",
-                local_dir=os.path.dirname(model_path),
-                local_dir_use_symlinks=False,
-            )
-            # Move to expected location
-            os.rename(downloaded_model, model_path)
-        
-        # Download voices file
-        if not os.path.exists(voices_path):
-            print(f"[TTSS] Downloading voices-v1.0.bin...")
-            downloaded_voices = hf_hub_download(
-                repo_id=repo_id,
-                filename="voices/voices-v1.0.bin",
-                local_dir=os.path.dirname(voices_path),
-                local_dir_use_symlinks=False,
-            )
-            # Move to expected location
-            os.rename(downloaded_voices, voices_path)
-        
-        print("[TTSS] Kokoro models downloaded successfully!")
+        # Call engine function
+        engines.synth_kokoro(
+            text, output_file, voice, lang_code, speed, keep_models,
+            MODEL_MANAGER, tts_models_path, KOKORO_REPO_ID
+        )
     
     def _synth_orpheus(self, text, output_file, lang, voice, keep_models: bool = False):
         """Synthesize using Orpheus TTS via llama.cpp (SOTA LLM-based TTS with emotions).
@@ -944,210 +646,11 @@ class TTSSTextToSpeech:
             lang: Language (English, French, German, Korean, Hindi, Mandarin, Spanish, Italian)
             voice: Voice identifier (e.g., "en_tara", "fr_speaker_0")
         """
-        import numpy as np
-        from scipy.io.wavfile import write as wav_write
-        
-        # Check for llama-cpp-python first (more likely to fail)
-        try:
-            import llama_cpp
-        except ImportError:
-            raise ImportError(
-                "[TTSS] llama-cpp-python not installed or incompatible.\n\n"
-                "For Python 3.10-3.12 with CUDA:\n"
-                "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124\n\n"
-                "For Python 3.10-3.12 CPU only:\n"
-                "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu\n\n"
-                "⚠️ Python 3.13: No pre-built wheels available. Requires building from source with CUDA toolkit.\n"
-                "   See: https://github.com/abetlen/llama-cpp-python#installation"
-            )
-        
-        try:
-            from orpheus_cpp import OrpheusCpp
-        except ImportError:
-            raise ImportError(
-                "[TTSS] Orpheus TTS not installed. Run:\n"
-                "  pip install orpheus-cpp\n\n"
-                "Note: First run will download ~3GB GGUF model."
-            )
-        
-        
-        orpheus_repo = ORPHEUS_MODELS.get(lang, ORPHEUS_MODELS["English"])  # Default to English
-        snac_repo = SNAC_REPO_ID
-        
-        # Download main Orpheus model
-        orpheus_model_path = os.path.join(tts_orpheus_path, os.path.basename(orpheus_repo))
-        if not os.path.exists(orpheus_model_path):
-            print(f"[TTSS] Downloading Orpheus model to: {orpheus_model_path}")
-            from huggingface_hub import snapshot_download
-            snapshot_download(
-                repo_id=orpheus_repo,
-                local_dir=orpheus_model_path,
-                local_dir_use_symlinks=False,
-            )
-        
-        # Download SNAC model
-        snac_model_path = os.path.join(tts_orpheus_path, "snac_24khz-ONNX")
-        if not os.path.exists(snac_model_path):
-            print(f"[TTSS] Downloading SNAC model to: {snac_model_path}")
-            from huggingface_hub import snapshot_download
-            snapshot_download(
-                repo_id=snac_repo,
-                local_dir=snac_model_path,
-                local_dir_use_symlinks=False,
-            )
-        
-        # Initialize Orpheus with llama.cpp backend (GPU enabled)
-        # Long-form audio processing: Split text into sentences for better quality
-        import re
-    
-        # Split text into sentences (handle common sentence endings)
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        sentences = [s.strip() for s in sentences if s.strip()]
-    
-        # If text is short, process as single chunk
-        if len(sentences) <= 1 or len(text) < 500:
-            text_chunks = [text]
-        else:
-            # Group sentences into chunks (aim for ~200-300 words per chunk)
-            text_chunks = []
-            current_chunk = ""
-        
-            for sentence in sentences:
-                if len(current_chunk + sentence) < 300:  # Character count approximation
-                    current_chunk += sentence + " "
-                else:
-                    if current_chunk:
-                        text_chunks.append(current_chunk.strip())
-                    current_chunk = sentence + " "
-        
-            if current_chunk:
-                text_chunks.append(current_chunk.strip())
-    
-        print(f"[TTSS] Processing {len(text_chunks)} text chunks for long-form audio")
-    
-        # Initialize Orpheus with correct language
-        lang_code = lang[:2].lower()  # "en", "fr", "de", etc.
-        # Use cached orpheus instance if available (ModelManager)
-        n_gpu_layers = -1
-        orpheus = MODEL_MANAGER.get_orpheus(lang, n_gpu_layers=n_gpu_layers)
-    
-        # Process each chunk and collect audio
-        all_audio_chunks = []
-        sample_rate = None
-    
-        for i, chunk_text in enumerate(text_chunks):
-            print(f"[TTSS] Processing chunk {i+1}/{len(text_chunks)}: {chunk_text[:50]}...")
-        
-            # Generate speech for this chunk
-            chunk_buffer = []
-            chunk_sample_rate = None
-        
-            for j, (sr, audio_chunk) in enumerate(orpheus.stream_tts_sync(chunk_text, options={"voice_id": voice})):
-                    if chunk_sample_rate is None:
-                        chunk_sample_rate = sr
-                        if sample_rate is None:
-                            sample_rate = sr
-                    # Normalize and convert to mono/float32 for safe concatenation
-                    def _to_mono_float32(arr):
-                        arr = np.asarray(arr)
-                        # Convert integer arrays to float32 normalized -1..1
-                        if arr.dtype.kind in ('i', 'u'):
-                            try:
-                                maxv = np.iinfo(arr.dtype).max
-                                arr = arr.astype(np.float32) / float(maxv)
-                            except Exception:
-                                arr = arr.astype(np.float32)
-                        else:
-                            arr = arr.astype(np.float32)
-                        if arr.ndim > 1:
-                            # Many audio libraries return shape (channels, samples) or (samples, channels)
-                            if arr.shape[0] <= 4 and arr.shape[1] > arr.shape[0]:
-                                # shape (channels, samples)
-                                arr = arr.mean(axis=0)
-                            else:
-                                # shape (samples, channels)
-                                arr = arr.mean(axis=1)
-                        return arr
-                    audio_chunk = _to_mono_float32(audio_chunk)
-                    chunk_buffer.append(audio_chunk)
-        
-            if chunk_buffer:
-                # Concatenate chunk audio (ensure numpy arrays)
-                chunk_audio = np.concatenate([np.asarray(x, dtype=np.float32) for x in chunk_buffer], axis=0)
-                all_audio_chunks.append(chunk_audio)
-    
-        # If we failed to capture a sample rate, fall back to 24000
-        if sample_rate is None and len(all_audio_chunks) > 0:
-            sample_rate = 24000
-
-        # Crossfade stitching between chunks
-        if len(all_audio_chunks) > 1:
-            print("[TTSS] Applying crossfade stitching between audio chunks")
-
-            # Crossfade parameters (200ms at 24kHz)
-            crossfade_samples = int(0.2 * sample_rate)  # 200ms crossfade
-
-            stitched_audio = [all_audio_chunks[0]]  # First chunk unchanged
-
-            for i in range(1, len(all_audio_chunks)):
-                prev_chunk = stitched_audio[-1]
-                curr_chunk = all_audio_chunks[i]
-
-                # Ensure we have enough samples for crossfade
-                crossfade_len = min(crossfade_samples, len(prev_chunk), len(curr_chunk))
-
-                if crossfade_len > 0:
-                    # Create crossfade window (linear fade out/in)
-                    fade_out = np.linspace(1.0, 0.0, crossfade_len)
-                    fade_in = np.linspace(0.0, 1.0, crossfade_len)
-
-                    # Apply crossfade
-                    prev_end = prev_chunk[-crossfade_len:]
-                    curr_start = curr_chunk[:crossfade_len]
-
-                    # Mix the overlapping regions
-                    mixed_region = prev_end * fade_out + curr_start * fade_in
-
-                    # Combine: prev_chunk (without overlap) + mixed_region + curr_chunk (without overlap)
-                    combined = np.concatenate([
-                        prev_chunk[:-crossfade_len],
-                        mixed_region,
-                        curr_chunk[crossfade_len:]
-                    ])
-
-                    stitched_audio[-1] = combined
-                else:
-                    # No crossfade possible, just concatenate
-                    stitched_audio[-1] = np.concatenate([prev_chunk, curr_chunk])
-
-            # Final concatenation
-            audio = stitched_audio[0]
-        else:
-            # Single chunk, no stitching needed
-            audio = all_audio_chunks[0] if all_audio_chunks else np.array([])
-    
-        # Save final audio (convert to int16 for wider player compatibility)
-        if len(audio) > 0:
-            # Ensure numpy float32 in -1..1 before scaling to int16
-            audio = np.asarray(audio, dtype=np.float32)
-            max_abs = float(np.max(np.abs(audio))) if audio.size > 0 else 0.0
-            if max_abs > 1.0:
-                # Normalize by maximum to avoid clipping
-                audio = audio / max_abs
-            # Convert to int16
-            int_audio = (audio * 32767.0).astype(np.int16)
-            wav_write(output_file, sample_rate, int_audio)
-        # Decide per-node keep vs global default
-        effective_keep = bool(keep_models) or getattr(MODEL_MANAGER, 'keep_models_default', False)
-        # Unload the orpheus instance if configured to not keep models loaded
-        if not effective_keep:
-            try:
-                MODEL_MANAGER.unload_orpheus(lang, n_gpu_layers=n_gpu_layers)
-            except Exception:
-                pass
-        # If no audio generated, raise
-        if len(audio) == 0:
-            raise RuntimeError("[TTSS] Orpheus generated no audio")
+        # Call engine function
+        engines.synth_orpheus(
+            text, output_file, lang, voice, keep_models,
+            MODEL_MANAGER, tts_orpheus_path, ORPHEUS_MODELS, SNAC_REPO_ID
+        )
     
     def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
         """Synthesize using CSM (Conversational Speech Model) via HuggingFace Transformers.
@@ -1174,126 +677,11 @@ class TTSSTextToSpeech:
             speaker_id: Speaker ID (0-9) for voice character
             context_audio: Optional previous audio for conversational continuity
         """
-        tmp_context_path = None # Initialize variable
-        try:
-            import torch
-            import torchaudio
-            from transformers import CsmForConditionalGeneration, AutoProcessor
-        except ImportError as e:
-            raise ImportError(
-                f"[TTSS] CSM requires: pip install transformers>=4.52.1 torchaudio accelerate\n"
-                f"Missing: {e}"
-            )
-        
-        try:
-            # Check for CUDA (CSM is heavy, GPU strongly recommended)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            if device == "cpu":
-                print("[TTSS] WARNING: CSM on CPU will be very slow. GPU strongly recommended!")
-            
-            # Model ID: unsloth/csm-1b (community downstream of sesame's CSM)
-            # unsloth/csm-1b is Apache-2.0 and does not require gate access like sesame's gated model did.
-            model_id = CSM_MODEL_ID
-            
-            print(f"[TTSS] Loading CSM model from {model_id}...")
-            
-            # Download model to ComfyUI directory (not user cache)
-            local_model_path = os.path.join(tts_csm_path, model_id.replace("/", "_"))
-            if not os.path.exists(local_model_path):
-                print(f"[TTSS] Downloading CSM model to: {local_model_path}")
-                from huggingface_hub import snapshot_download
-                try:
-                    snapshot_download(
-                        repo_id=model_id,
-                        local_dir=local_model_path,
-                        local_dir_use_symlinks=False,
-                    )
-                    print(f"[TTSS] CSM model downloaded successfully")
-                except Exception as e:
-                    raise RuntimeError(f"[TTSS] Failed to download CSM model: {e}") from e
-            
-            # Use cached model via ModelManager
-            try:
-                processor, model = MODEL_MANAGER.get_csm(local_model_path, device)
-            except Exception as e:
-                error_msg = str(e)
-                if "401" in error_msg or "403" in error_msg or "gated" in error_msg.lower():
-                    raise RuntimeError(
-                        f"[TTSS] CSM model access denied: {e}.\n"
-                        f"If you think this is a permissions issue, please check your HuggingFace account or token and ensure the model repo is available (unsloth/csm-1b).\n"
-                        f"Original error: {e}"
-                    )
-                raise
-            
-            # Build conversation with speaker ID
-            # CSM expects role=speaker_id (as string) and content as list of typed dicts
-            conversation = [
-                {
-                    "role": f"{speaker_id}",
-                    "content": [{"type": "text", "text": text}]
-                }
-            ]
-            
-            # If context audio provided, add it as conversation history
-            if context_audio and os.path.exists(context_audio):
-                print(f"[TTSS] Using context audio: {context_audio}")
-                context_waveform, context_sr = torchaudio.load(context_audio)
-                # Resample to 24kHz if needed (CSM uses 24kHz)
-                audio_to_pass = context_audio
-                if context_sr != 24000:
-                    resampler = torchaudio.transforms.Resample(context_sr, 24000)
-                    context_waveform = resampler(context_waveform)
-                    # Create a safe temp file that we can track
-                    fd, tmp_context_path = tempfile.mkstemp(suffix=".wav", dir=output_path)
-                    os.close(fd) # Close file descriptor immediately so torchaudio can write to it
-                    torchaudio.save(tmp_context_path, context_waveform, 24000)
-                    audio_to_pass = tmp_context_path
-                # Add context as previous turn (audio comes from a file path)
-                conversation.insert(0, {
-                    "role": f"{speaker_id}", 
-                    "content": [
-                        {"type": "text", "text": ""},  # Empty text for context turn
-                        {"type": "audio", "path": audio_to_pass}
-                    ]
-                })
-            
-            # Process inputs
-            inputs = processor.apply_chat_template(
-                conversation,
-                tokenize=True,
-                return_dict=True,
-            ).to(device)
-            
-            # Generate audio
-            print(f"[TTSS] Generating speech with CSM (speaker={speaker_id})...")
-            with torch.no_grad():
-                audio_output = model.generate(
-                    **inputs,
-                    output_audio=True,
-                    max_new_tokens=2048,  # ~85 seconds at 24kHz
-                )
-            
-            # Save audio (CSM outputs 24kHz)
-            processor.save_audio(audio_output, output_file)
-            
-            print(f"[TTSS] CSM synthesis complete: {output_file}")
-
-        finally:
-            # [FIX] Clean up the temp file even if errors occur
-            if tmp_context_path and os.path.exists(tmp_context_path):
-                try:
-                    os.remove(tmp_context_path)
-                except Exception:
-                    print(f"[TTSS] Warning: Could not remove temp file {tmp_context_path}")
-
-            # Always unload CSM after use
-            effective_keep = False
-            # Unload CSM
-            if not effective_keep:
-                try:
-                    MODEL_MANAGER.unload_csm(local_model_path, device)
-                except Exception:
-                    pass
+        # Call engine function
+        engines.synth_csm(
+            text, output_file, speaker_id, context_audio,
+            MODEL_MANAGER, tts_csm_path, CSM_MODEL_ID, output_path
+        )
     
     def _extract_text_from_srt(self, srt_path):
         """Extract plain text from SRT file."""
@@ -1678,78 +1066,11 @@ class TTSConversation:
     
     def _synth_csm_conversation(self, conversation, output_file):
         """Synthesize conversation using CSM with multiple speakers."""
-        
-        try:
-            import torch
-            import torchaudio
-            from transformers import CsmForConditionalGeneration, AutoProcessor
-        except ImportError as e:
-            raise ImportError(
-                f"[TTSS] CSM requires: pip install transformers>=4.52.1 torchaudio accelerate\n"
-                f"Missing: {e}"
-            )
-        
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        if device == "cpu":
-            print("[TTSS] WARNING: CSM on CPU will be very slow. GPU strongly recommended!")
-        
-        model_id = CSM_MODEL_ID
-        print(f"[TTSS] Loading CSM model for conversation...")
-        
-        # Download model to ComfyUI directory
-        local_model_path = os.path.join(tts_csm_path, model_id.replace("/", "_"))
-        if not os.path.exists(local_model_path):
-            print(f"[TTSS] Downloading CSM model to: {local_model_path}")
-            from huggingface_hub import snapshot_download
-            try:
-                snapshot_download(
-                    repo_id=model_id,
-                    local_dir=local_model_path,
-                    local_dir_use_symlinks=False,
-                )
-                print(f"[TTSS] CSM model downloaded successfully")
-            except Exception as e:
-                raise RuntimeError(f"[TTSS] Failed to download CSM model: {e}") from e
-        
-        # Use cached model from ModelManager (may load once)
-        try:
-            processor, model = MODEL_MANAGER.get_csm(local_model_path, device)
-        except Exception as e:
-            error_msg = str(e)
-            if "401" in error_msg or "403" in error_msg or "gated" in error_msg.lower():
-                raise RuntimeError(
-                    f"[TTSS] CSM model access denied: {e}.\n"
-                    f"If you think this is a permissions issue, please check your HuggingFace account or token and ensure the model repo is available (unsloth/csm-1b).\n"
-                    f"Original error: {e}"
-                )
-            raise
-        
-        # Process conversation
-        inputs = processor.apply_chat_template(
-            conversation,
-            tokenize=True,
-            return_dict=True,
-        ).to(device)
-        
-        print(f"[TTSS] Generating conversation with {len(conversation)} turns...")
-        with torch.no_grad():
-            audio_output = model.generate(
-                **inputs,
-                output_audio=True,
-                max_new_tokens=2048 * len(conversation),  # Scale with conversation length
-            )
-        
-        # Save audio
-        processor.save_audio(audio_output, output_file)
-        print(f"[TTSS] Conversation synthesis complete: {output_file}")
-        # Always unload CSM after use
-        effective_keep = False
-        # Unload model to free resources
-        if not effective_keep:
-            try:
-                MODEL_MANAGER.unload_csm(local_model_path, device)
-            except Exception:
-                pass
+        # Call engine function
+        engines.synth_csm_conversation(
+            conversation, output_file, 
+            MODEL_MANAGER, tts_csm_path, CSM_MODEL_ID
+        )
 
 
 # =============================================================================
