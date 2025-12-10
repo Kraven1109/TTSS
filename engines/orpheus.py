@@ -167,16 +167,16 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
     print("[TTSS] Decoding SNAC codes to audio...")
     try:
         # Convert SNAC codes to tensor format expected by SNAC decoder
-        # SNAC expects shape: [batch, num_hierarchies, sequence_length]
-        # But let's try different shapes
-        snac_tensor = torch.tensor(snac_codes, dtype=torch.long).unsqueeze(0).to(snac_device)
-        print(f"[TTSS] SNAC tensor shape: {snac_tensor.shape}")
+        # SNAC decode() expects shape: [num_hierarchies, sequence_length] (NO batch dimension)
+        # snac_codes from _extract_snac_codes is already [num_hierarchies, sequence_length]
+        snac_tensor = torch.tensor(snac_codes, dtype=torch.long).to(snac_device)
+        print(f"[TTSS] SNAC tensor shape: {snac_tensor.shape} (expected: [num_hierarchies=3, sequence_length])")
         
-        # Try without unsqueeze if that doesn't work
-        if snac_tensor.shape[1] != 3:
-            print(f"[TTSS] Wrong shape, trying transpose...")
-            snac_tensor = torch.tensor(snac_codes, dtype=torch.long).t().unsqueeze(0).to(snac_device)
-            print(f"[TTSS] SNAC tensor shape after transpose: {snac_tensor.shape}")
+        # Verify we have the correct shape
+        if snac_tensor.ndim != 2:
+            raise RuntimeError(f"[TTSS] SNAC codes have wrong dimensions: {snac_tensor.shape}, expected 2D [hierarchies, sequence]")
+        if snac_tensor.shape[0] != 3:
+            raise RuntimeError(f"[TTSS] SNAC codes have {snac_tensor.shape[0]} hierarchies, expected 3")
         
         # Decode to audio waveform
         with torch.no_grad():
