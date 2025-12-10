@@ -142,7 +142,7 @@ CSM_MODEL_ID = "unsloth/csm-1b"
 SNAC_REPO_ID = "hubertsiuzdak/snac_24khz"
 
 # Orpheus model - unified model for all languages via Transformers
-ORPHEUS_MODEL_ID = "unsloth/orpheus-3b-0.1-ft"
+ORPHEUS_MODEL_ID = "kyutai/orpheus-3b"
 
 
 # =============================================================================

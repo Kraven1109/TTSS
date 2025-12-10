@@ -21,7 +21,7 @@ kokoro-onnx>=0.4.9    # Kokoro TTS with ONNX Runtime (auto-downloads model)
 # Uses Transformers with optional Unsloth acceleration - pure Python, no C++ compilation!
 # Works on Windows/Linux/macOS
 snac                           # SNAC audio codec for decoding
-# First run downloads ~3GB model automatically (unsloth/orpheus-3b-0.1-ft)
+# First run downloads ~3GB model automatically (kyutai/orpheus-3b)
 #
 # Optional for better performance:
 #   pip install unsloth bitsandbytes
