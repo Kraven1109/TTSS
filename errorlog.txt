@@ -3,6 +3,75 @@ got prompt
    <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
 [TTSS] Orpheus descriptors:
    happy, normal, sad, angry, excited, surprised, whisper, shout, deep, high, slow, fast, frustrated, panicky, curious, sleepy, crying, longer, disgust
+[TTSS] Engine: orpheus, Voice: en_tara, Text: Hello, this is a test of text to speech. orpheus is sota...
+[TTSS] bitsandbytes not available - using fp16 (requires more VRAM)
+[TTSS] Loading Orpheus model: unsloth/orpheus-3b-0.1-ft
+[TTSS] Unsloth not found, using standard Transformers...
+[TTSS] Loading in fp16/fp32 mode (no quantization)...
+We will use 90% of the memory on device 0 for storing the model, and 10% for the buffer to avoid OOM. You can set `max_memory` in to a higher value to use more memory (at your own risk).
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████| 2/2 [00:04<00:00,  2.01s/it]
+[TTSS] Generating Orpheus tokens...
+[TTSS] Decoded output preview: <|begin_of_text|><|audio|>en_tara: Hello, this is a test of text to speech. orpheus is sota<|eot_id|><custom_token_4><custom_token_5><custom_token_1><custom_token_958><custom_token_4571><custom_token_...
+[TTSS] Decoded text preview: <|begin_of_text|><|audio|>en_tara: Hello, this is a test of text to speech. orpheus is sota<|eot_id|><custom_token_4><custom_token_5><custom_token_1><custom_token_958><custom_token_4571><custom_token_9195><custom_token_15216><custom_token_18382><custom_token_24019><custom_token_25772><custom_token_987><custom_token_6787><custom_token_10455><custom_token_12815><custom_token_19353><custom_token_23979><custom_token_28311><custom_token_19><custom_token_5834><custom_token_9633><custom_token_14975><cu...
+[TTSS] Found 426 raw numbers
+[TTSS] First 20 numbers: ['4', '5', '1', '958', '4571', '9195', '15216', '18382', '24019', '25772', '987', '6787', '10455', '12815', '19353', '23979', '28311', '19', '5834', '9633']
+[TTSS] WARNING: Found 360 codes outside valid SNAC range [0-4095]
+[TTSS] Invalid codes: [4571, 9195, 15216, 18382, 24019, 25772, 6787, 10455, 12815, 19353]...
+[TTSS] Clamped codes to valid range
+[TTSS] Can make 142 frames with 3 SNAC codebooks
+[TTSS] Final SNAC array shape: (3, 142)
+[TTSS] SNAC code range: [1, 4095]
+[TTSS] Extracted 3 SNAC code groups
+[TTSS] Decoding SNAC codes to audio...
+[TTSS] SNAC tensor shape: torch.Size([1, 3, 142])
+!!! Exception during processing !!! [TTSS] Engine 'orpheus' failed: [TTSS] Failed to decode SNAC codes to audio: index 1 is out of bounds for dimension 0 with size 1
+Traceback (most recent call last):
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\engines\orpheus.py", line 183, in synth_orpheus
+    audio_output = snac_model.decode(snac_tensor)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\snac\snac.py", line 89, in decode
+    z_q = self.quantizer.from_codes(codes)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\snac\vq.py", line 94, in from_codes
+    z_p_i = self.quantizers[i].decode_code(codes[i])
+                                           ~~~~~^^^
+IndexError: index 1 is out of bounds for dimension 0 with size 1
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\nodes.py", line 498, in synthesize
+    self._synth_orpheus(final_text, output_file, orpheus_lang, voice_name, keep_models == "True")
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\nodes.py", line 592, in _synth_orpheus
+    engines.synth_orpheus(
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\engines\orpheus.py", line 205, in synth_orpheus
+    raise RuntimeError(f"[TTSS] Failed to decode SNAC codes to audio: {e}")
+RuntimeError: [TTSS] Failed to decode SNAC codes to audio: index 1 is out of bounds for dimension 0 with size 1
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 510, in execute
+    output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, hidden_inputs=hidden_inputs)
+                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 324, in get_output_data
+    return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, hidden_inputs=hidden_inputs)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 298, in _async_map_node_over_list
+    await process_inputs(input_dict, i)
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 286, in process_inputs
+    result = f(**inputs)
+             ^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\nodes.py", line 504, in synthesize
+    raise RuntimeError(f"[TTSS] Engine '{engine}' failed: {synth_err}") from synth_err
+RuntimeError: [TTSS] Engine 'orpheus' failed: [TTSS] Failed to decode SNAC codes to audio: index 1 is out of bounds for dimension 0 with size 1
+
+Prompt executed in 28.52 seconds
+got prompt
+[TTSS] Orpheus inline tags:
+   <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
+[TTSS] Orpheus descriptors:
+   happy, normal, sad, angry, excited, surprised, whisper, shout, deep, high, slow, fast, frustrated, panicky, curious, sleepy, crying, longer, disgust
 [TTSS] Engine: edge-tts, Voice: en-US-AriaNeural, Text: Hello, this is a test of text to speech. orpheus is sota...
 !!! Exception during processing !!! [TTSS] Engine 'edge-tts' failed: edge-tts failed: Traceback (most recent call last):
   File "<frozen runpy>", line 198, in _run_module_as_main
