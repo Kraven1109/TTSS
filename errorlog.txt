@@ -1,0 +1,89 @@
+got prompt
+[TTSS] Orpheus inline tags:
+   <laugh>, <chuckle>, <sigh>, <cough>, <sniffle>, <groan>, <yawn>, <gasp>
+[TTSS] Orpheus descriptors:
+   happy, normal, sad, angry, excited, surprised, whisper, shout, deep, high, slow, fast, frustrated, panicky, curious, sleepy, crying, longer, disgust
+[TTSS] Engine: edge-tts, Voice: en-US-AriaNeural, Text: Hello, this is a test of text to speech. orpheus is sota...
+!!! Exception during processing !!! [TTSS] Engine 'edge-tts' failed: edge-tts failed: Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Apps\ComfyUI_portable\python_embeded\Scripts\edge-tts.exe\__main__.py", line 6, in <module>
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 137, in main
+    asyncio.run(amain())
+  File "asyncio\runners.py", line 195, in run
+  File "asyncio\runners.py", line 118, in run
+  File "asyncio\base_events.py", line 691, in run_until_complete
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 132, in amain
+    await _run_tts(args)
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 72, in _run_tts
+    async for chunk in communicate.stream():
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\communicate.py", line 566, in stream
+    async for message in self.__stream():
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\communicate.py", line 541, in __stream
+    raise NoAudioReceived(
+edge_tts.exceptions.NoAudioReceived: No audio was received. Please verify that your parameters are correct.
+
+Traceback (most recent call last):
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\nodes.py", line 494, in synthesize
+    self._synth_edge_tts(final_text, output_file, voice_name, speed)
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\nodes.py", line 552, in _synth_edge_tts
+    engines.synth_edge_tts(text, output_file, voice_name, speed)
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\engines\edge_tts.py", line 55, in synth_edge_tts
+    raise RuntimeError(f"edge-tts failed: {result.stderr}")
+RuntimeError: edge-tts failed: Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Apps\ComfyUI_portable\python_embeded\Scripts\edge-tts.exe\__main__.py", line 6, in <module>
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 137, in main
+    asyncio.run(amain())
+  File "asyncio\runners.py", line 195, in run
+  File "asyncio\runners.py", line 118, in run
+  File "asyncio\base_events.py", line 691, in run_until_complete
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 132, in amain
+    await _run_tts(args)
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 72, in _run_tts
+    async for chunk in communicate.stream():
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\communicate.py", line 566, in stream
+    async for message in self.__stream():
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\communicate.py", line 541, in __stream
+    raise NoAudioReceived(
+edge_tts.exceptions.NoAudioReceived: No audio was received. Please verify that your parameters are correct.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 510, in execute
+    output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, hidden_inputs=hidden_inputs)
+                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 324, in get_output_data
+    return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, hidden_inputs=hidden_inputs)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 298, in _async_map_node_over_list
+    await process_inputs(input_dict, i)
+  File "D:\Apps\ComfyUI_portable\ComfyUI\execution.py", line 286, in process_inputs
+    result = f(**inputs)
+             ^^^^^^^^^^^
+  File "D:\Apps\ComfyUI_portable\ComfyUI\custom_nodes\comfyUI-TTSS\nodes.py", line 504, in synthesize
+    raise RuntimeError(f"[TTSS] Engine '{engine}' failed: {synth_err}") from synth_err
+RuntimeError: [TTSS] Engine 'edge-tts' failed: edge-tts failed: Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\Apps\ComfyUI_portable\python_embeded\Scripts\edge-tts.exe\__main__.py", line 6, in <module>
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 137, in main
+    asyncio.run(amain())
+  File "asyncio\runners.py", line 195, in run
+  File "asyncio\runners.py", line 118, in run
+  File "asyncio\base_events.py", line 691, in run_until_complete
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 132, in amain
+    await _run_tts(args)
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\util.py", line 72, in _run_tts
+    async for chunk in communicate.stream():
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\communicate.py", line 566, in stream
+    async for message in self.__stream():
+  File "D:\Apps\ComfyUI_portable\python_embeded\Lib\site-packages\edge_tts\communicate.py", line 541, in __stream
+    raise NoAudioReceived(
+edge_tts.exceptions.NoAudioReceived: No audio was received. Please verify that your parameters are correct.
+
+
+Prompt executed in 6.42 seconds
