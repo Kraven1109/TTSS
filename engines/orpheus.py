@@ -55,7 +55,8 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
             "Note: First run will download ~3GB GGUF model."
         )
     
-    orpheus_repo = orpheus_models.get(lang, orpheus_models["English"])  # Default to English
+    # Default to English model if language not found
+    orpheus_repo = orpheus_models.get(lang, orpheus_models.get("English", "isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF"))
     
     # Download main Orpheus model
     orpheus_model_path = os.path.join(tts_orpheus_path, os.path.basename(orpheus_repo))
