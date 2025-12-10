@@ -24,7 +24,7 @@ WEB_DIRECTORY = "./web"
 # Import nodes
 from .nodes import (
     TTSSTextToSpeech,
-    TTSSLoadReferenceAudio,
+    TTSConversation,
     TTSSLoadAudio,
     TTSSLoadSRT,
     TTSSPreviewAudio,
@@ -35,7 +35,8 @@ from .nodes import (
 # Node class mappings for ComfyUI
 NODE_CLASS_MAPPINGS = {
     "TTSSTextToSpeech": TTSSTextToSpeech,
-    "TTSSLoadReferenceAudio": TTSSLoadReferenceAudio,
+    "TTSConversation": TTSConversation,
+    # TTSSLoadReferenceAudio (deprecated / removed)
     "TTSSLoadAudio": TTSSLoadAudio,
     "TTSSLoadSRT": TTSSLoadSRT,
     "TTSSPreviewAudio": TTSSPreviewAudio,
@@ -46,7 +47,7 @@ NODE_CLASS_MAPPINGS = {
 # Human-readable node names with prefix for search
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TTSSTextToSpeech": "🔊 TTSS Text to Speech",
-    "TTSSLoadReferenceAudio": "🎙️ TTSS Load Reference Audio",
+    "TTSConversation": "💬 TTSS Conversation (Multi-Speaker)",
     "TTSSLoadAudio": "📂 TTSS Load Audio",
     "TTSSLoadSRT": "📄 TTSS Load SRT",
     "TTSSPreviewAudio": "🎧 TTSS Preview Audio",

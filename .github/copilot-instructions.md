@@ -7,14 +7,14 @@ TTSS is a ComfyUI custom node package for multi-engine text-to-speech synthesis.
 - `pyttsx3` - Offline system voices (SAPI/NSSpeech/espeak)
 - `edge-tts` - Microsoft Edge TTS (online, 550+ voices, free)
 - `kokoro` - Lightweight neural TTS (82M params, fast, multi-language)
-- `orpheus` - SOTA LLM-based TTS with emotion tags (3B params, GPU)
+- `orpheus` - SOTA LLM-based TTS with emotion tags and multilingual support (3B params, GPU)
 - `csm` - Conversational Speech Model (1B params, conversational, GPU)
 
 ## Project Structure
 ```
 comfyUI-TTSS/
 ├── __init__.py          # ComfyUI node registration (NODE_CLASS_MAPPINGS)
-├── nodes.py             # All node implementations (7 nodes)
+├── nodes.py             # All node implementations (8 nodes)
 ├── requirements.txt     # Python dependencies
 ├── web/ttss.js          # Frontend audio preview widget
 ├── examples/            # Example ComfyUI workflows
@@ -24,10 +24,10 @@ comfyUI-TTSS/
 ## Model Directory (ComfyUI Convention)
 ```
 ComfyUI/models/tts/
-├── kokoro/              # Kokoro ONNX models
+├── kokoro/              # Kokoro ONNX models (auto-downloaded via HuggingFace Hub)
 ├── reference_audio/     # Voice cloning reference files (.wav, 6+ seconds)
 ├── orpheus/             # Orpheus LLM-based TTS models (pre-downloaded via snapshot_download)
-├── csm/                 # CSM conversational TTS models (GGUF format)
+├── csm/                 # CSM conversational TTS models (pre-downloaded via snapshot_download)
 └── voices/              # Custom voice models
 ```
 
@@ -36,11 +36,33 @@ ComfyUI/models/tts/
 | Node | Purpose | Key Method | Engine Support |
 |------|---------|------------|----------------|
 | `TTSSTextToSpeech` | Main TTS synthesis (with built-in voice selection) | `synthesize()` | All 5 engines |
+| `TTSConversation` | Multi-speaker conversational TTS | `generate_conversation()` | CSM only |
 | `TTSSLoadAudio` | Load audio files | `load_audio()` | - |
 | `TTSSLoadSRT` | Load SRT subtitles | `load_srt()` | - |
 | `TTSSPreviewAudio` | Audio preview in UI | `preview()` | - |
 | `TTSSCombineAudio` | Merge audio files | `combine()` | - |
 | `TTSSSaveAudio` | Save with format | `save_audio()` | - |
+
+## Voice Definitions
+
+### Orpheus Voices (Multilingual - 24 voices across 8 languages)
+```python
+ORPHEUS_VOICES = {
+    "English": ["tara", "leah", "jess", "leo", "dan", "mia", "zac", "zoe"],
+    "French": ["fr_speaker_0", "fr_speaker_1", "fr_speaker_2"],
+    "German": ["de_speaker_0", "de_speaker_1", "de_speaker_2"],
+    "Korean": ["ko_speaker_0", "ko_speaker_1", "ko_speaker_2"],
+    "Hindi": ["hi_speaker_0", "hi_speaker_1", "hi_speaker_2"],
+    "Mandarin": ["zh_speaker_0", "zh_speaker_1", "zh_speaker_2"],
+    "Spanish": ["es_speaker_0", "es_speaker_1", "es_speaker_2"],
+    "Italian": ["it_speaker_0", "it_speaker_1", "it_speaker_2"]
+}
+```
+
+### CSM Voices (Speaker IDs for conversational TTS)
+```python
+CSM_VOICES = [str(i) for i in range(10)]  # 0-9 speaker IDs
+```
 
 ## Key Code Patterns
 
@@ -48,7 +70,7 @@ ComfyUI/models/tts/
 ```python
 def synthesize(self, text, engine, speed, 
                pyttsx3_voice, edge_voice, kokoro_voice, kokoro_lang,
-               orpheus_voice, csm_voice, reference_audio, context_audio, ...):
+               orpheus_voice, csm_voice, context_audio, ...):
     if engine == "pyttsx3":
         self._synth_pyttsx3(text, output_file, pyttsx3_voice, speed)
     elif engine == "edge-tts":
@@ -66,9 +88,40 @@ def synthesize(self, text, engine, speed,
 def _synth_kokoro(self, text, output_file, voice, lang_code, speed):
     from kokoro_onnx import Kokoro
     import soundfile as sf
+    
+    # Auto-download models to ComfyUI directory
     kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
-    samples, sample_rate = kokoro.create(text, voice=voice, speed=speed, lang="en-us")
-    sf.write(output_file, samples, sample_rate)
+    
+    # Long-form processing: Handle phoneme limit (~510) by chunking text
+    import re
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # Chunk text to stay under phoneme limits
+    max_phonemes_per_chunk = 400  # Conservative limit
+    text_chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        estimated_phonemes = len(current_chunk + sentence) * 1.5
+        if estimated_phonemes < max_phonemes_per_chunk:
+            current_chunk += sentence + " "
+        else:
+            if current_chunk:
+                text_chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
+    
+    if current_chunk:
+        text_chunks.append(current_chunk.strip())
+    
+    # Process chunks and concatenate
+    all_audio_chunks = []
+    for chunk_text in text_chunks:
+        samples, sample_rate = kokoro.create(chunk_text, voice=voice, speed=speed, lang="en-us")
+        all_audio_chunks.append(samples)
+    
+    final_audio = np.concatenate(all_audio_chunks, axis=0)
+    sf.write(output_file, final_audio, sample_rate)
 ```
 
 ### CSM TTS (Conversational Speech Model, 1B params, HuggingFace Transformers)
@@ -78,10 +131,9 @@ def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
     import torchaudio
     from transformers import CsmForConditionalGeneration, AutoProcessor
     
-    # sesame/csm-1b is GATED - requires HuggingFace login:
-    #   huggingface-cli login
-    #   Then visit https://huggingface.co/sesame/csm-1b and accept terms
-    model_id = "sesame/csm-1b"
+    # By default, TTSS uses `unsloth/csm-1b` (Apache-2.0). If you prefer `sesame/csm-1b`,
+    # it is gated and requires a HuggingFace login and acceptance of the terms on their page.
+    model_id = "unsloth/csm-1b"
     
     # Download to ComfyUI models directory (not user cache)
     local_model_path = os.path.join(tts_csm_path, model_id.replace("/", "_"))
@@ -112,6 +164,65 @@ def _synth_csm(self, text, output_file, speaker_id, context_audio=None):
     
     audio_output = model.generate(**inputs, output_audio=True, max_new_tokens=2048)
     processor.save_audio(audio_output, output_file)  # 24kHz WAV
+```
+
+### Orpheus TTS (3B params, llama.cpp backend, Multi-language)
+```python
+def _synth_orpheus(self, text, output_file, lang, voice):
+    """Enhanced Orpheus with multilingual support and long-form processing."""
+    from orpheus_cpp import OrpheusCpp
+    import numpy as np
+    from scipy.io.wavfile import write as wav_write
+    
+    # Long-form processing: Split text into sentences for better quality
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # Group sentences into chunks (~300 chars per chunk)
+    text_chunks = []
+    current_chunk = ""
+    for sentence in sentences:
+        if len(current_chunk + sentence) < 300:
+            current_chunk += sentence + " "
+        else:
+            text_chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
+    if current_chunk:
+        text_chunks.append(current_chunk.strip())
+    
+    # Initialize with correct language
+    lang_code = lang[:2].lower()  # "en", "fr", "de", etc.
+    orpheus = OrpheusCpp(verbose=False, lang=lang_code, n_gpu_layers=-1)
+    
+    # Process chunks with crossfade stitching
+    all_audio_chunks = []
+    for chunk_text in text_chunks:
+        # Generate audio for chunk
+        chunk_buffer = []
+        for sr, audio_chunk in orpheus.stream_tts_sync(chunk_text, options={"voice_id": voice}):
+            chunk_buffer.append(audio_chunk)
+        chunk_audio = np.concatenate(chunk_buffer, axis=0)
+        all_audio_chunks.append(chunk_audio)
+    
+    # Crossfade stitching (200ms at 24kHz)
+    if len(all_audio_chunks) > 1:
+        crossfade_samples = int(0.2 * sr)
+        for i in range(1, len(all_audio_chunks)):
+            # Apply linear crossfade
+            fade_out = np.linspace(1.0, 0.0, crossfade_samples)
+            fade_in = np.linspace(0.0, 1.0, crossfade_samples)
+            # Mix overlapping regions
+            mixed = all_audio_chunks[i-1][-crossfade_samples:] * fade_out + \
+                   all_audio_chunks[i][:crossfade_samples] * fade_in
+            # Combine: prev - overlap + mixed + curr - overlap
+            all_audio_chunks[i-1] = np.concatenate([
+                all_audio_chunks[i-1][:-crossfade_samples], mixed, 
+                all_audio_chunks[i][crossfade_samples:]
+            ])
+            all_audio_chunks[i] = all_audio_chunks[i-1]
+    
+    # Save final audio
+    wav_write(output_file, sr, all_audio_chunks[-1])
 ```
 
 ### CSM Emotional / Expressive Tags

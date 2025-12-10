@@ -1,6 +1,7 @@
-# Voice Samples for TTSS
+# Voice Samples for TTSS (Deprecated)
 
-Place your voice reference audio files here for voice cloning presets.
+This folder previously held voice reference audio used for XTTS-v2 (Auralis) voice cloning.
+XTTS-v2 support has been removed from the plugin; these samples are retained only for archival purposes.
 
 ## File naming convention
 
@@ -17,14 +18,7 @@ The files should match the preset names in `nodes.py`:
 - **Quality**: Clean audio without background noise
 - **Content**: Natural speech in the target language
 
-## How XTTS voice cloning works
-
-XTTS-v2 uses audio reference samples to clone the voice characteristics:
-- Pitch and tone
-- Speaking style
-- Accent and pronunciation patterns
-
-The model does NOT use built-in male/female voices. Instead, it learns from your reference audio.
+<!-- Deprecated: XTTS-v2 removed -->
 
 ## Tips for best results
 

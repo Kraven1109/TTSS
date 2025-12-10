@@ -100,11 +100,6 @@
             "name": "text"
           }
         },
-        {
-          "name": "reference_audio",
-          "type": "AUDIOPATH",
-          "link": 3
-        }
       ],
       "outputs": [
         {
@@ -149,7 +144,7 @@
   "links": [
     [1, 1, 0, 2, 0, "IMAGE"],
     [2, 2, 0, 4, 0, "STRING"],
-    [3, 3, 0, 4, 1, "AUDIOPATH"],
+    
     [4, 4, 0, 5, 0, "AUDIOPATH"]
   ],
   "groups": [
