@@ -139,19 +139,10 @@ CSM_VOICES = [str(i) for i in range(10)]  # 0-9 speaker IDs
 # Model repository IDs for auto-download
 KOKORO_REPO_ID = "onnx-community/Kokoro-82M-v1.0-ONNX"
 CSM_MODEL_ID = "unsloth/csm-1b"
-SNAC_REPO_ID = "onnx-community/snac_24khz-ONNX"
+SNAC_REPO_ID = "hubertsiuzdak/snac_24khz"
 
-# Orpheus model repositories by language
-ORPHEUS_MODELS = {
-    "English": "isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF",
-    "Spanish": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
-    "French": "freddyaboulton/3b-fr-ft-research_release-Q4_K_M-GGUF",
-    "German": "freddyaboulton/3b-de-ft-research_release-Q4_K_M-GGUF",
-    "Italian": "freddyaboulton/3b-es_it-ft-research_release-Q4_K_M-GGUF",
-    "Hindi": "freddyaboulton/3b-hi-ft-research_release-Q4_K_M-GGUF",
-    "Mandarin": "freddyaboulton/3b-zh-ft-research_release-Q4_K_M-GGUF",
-    "Korean": "freddyaboulton/3b-ko-ft-research_release-Q4_K_M-GGUF",
-}
+# Orpheus model - unified model for all languages via Transformers
+ORPHEUS_MODEL_ID = "unsloth/orpheus-3b-0.1-ft"
 
 
 # =============================================================================
@@ -169,36 +160,6 @@ class ModelManager:
         if key not in self._locks:
             self._locks[key] = threading.Lock()
         return self._locks[key]
-
-    def get_orpheus(self, lang: str = "English", n_gpu_layers: int = -1):
-        key = f"orpheus:{lang}:{n_gpu_layers}"
-        with self._lock(key):
-            if key not in self._cache:
-                try:
-                    from orpheus_cpp import OrpheusCpp
-                except Exception as e:
-                    raise
-                self._cache[key] = OrpheusCpp(verbose=False, lang=lang[:2].lower(), n_gpu_layers=n_gpu_layers)
-            return self._cache[key]
-
-    def unload_orpheus(self, lang: str = "English", n_gpu_layers: int = -1):
-        key = f"orpheus:{lang}:{n_gpu_layers}"
-        with self._lock(key):
-            if key in self._cache:
-                try:
-                    del self._cache[key]
-                except Exception:
-                    pass
-
-                # Force memory cleanup
-                import gc
-                gc.collect()
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                except Exception:
-                    pass
 
     def get_kokoro(self, model_path: str, voices_path: str):
         key = f"kokoro:{model_path}:{voices_path}"
@@ -625,7 +586,7 @@ class TTSSTextToSpeech:
         # Call engine function
         engines.synth_orpheus(
             text, output_file, lang, voice, keep_models,
-            MODEL_MANAGER, tts_orpheus_path, ORPHEUS_MODELS, SNAC_REPO_ID
+            MODEL_MANAGER, tts_orpheus_path, ORPHEUS_MODEL_ID, SNAC_REPO_ID
         )
     
     def _synth_csm(self, text, output_file, speaker_id, context_audio=None):

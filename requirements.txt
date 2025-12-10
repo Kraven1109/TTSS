@@ -18,14 +18,14 @@ kokoro-onnx>=0.4.9    # Kokoro TTS with ONNX Runtime (auto-downloads model)
 
 # === ORPHEUS (optional - SOTA LLM-based TTS, 3B params) ===
 # Human-like speech with emotion tags: <laugh>, <sigh>, <gasp>, <chuckle>
-# Uses llama.cpp backend - works on Windows/Linux/macOS without vLLM!
-orpheus-cpp                    # Orpheus TTS with llama.cpp backend
-# First run downloads ~3GB GGUF model automatically
+# Uses Transformers with optional Unsloth acceleration - pure Python, no C++ compilation!
+# Works on Windows/Linux/macOS
+snac                           # SNAC audio codec for decoding
+# First run downloads ~3GB model automatically (unsloth/orpheus-3b-0.1-ft)
 #
-# For CPU inference:
-#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
-# For GPU acceleration (CUDA 12.4):
-#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+# Optional for better performance:
+#   pip install unsloth bitsandbytes
+# These provide 4-bit quantization and acceleration but are not required
 
 # === CSM (optional - Conversational Speech Model, 1B params) ===
 # Premium conversational TTS with conversational context awareness

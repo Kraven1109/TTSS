@@ -1,236 +1,259 @@
 """
 Orpheus TTS Engine
 SOTA LLM-based TTS with emotion tags (3B params, GPU)
+Uses Transformers with optional Unsloth acceleration for easier maintenance
 """
 
 import os
+import re
 
 
 def synth_orpheus(text, output_file, lang, voice, keep_models, 
-                  model_manager, tts_orpheus_path, orpheus_models, snac_repo_id):
-    """Synthesize using Orpheus TTS via llama.cpp (SOTA LLM-based TTS with emotions).
+                  model_manager, tts_orpheus_path, orpheus_model_id, snac_repo_id):
+    """Synthesize using Orpheus TTS via Unsloth/Transformers (Python backend).
     
-    Enhanced with multilingual support (24 voices across 8 languages) and long-form audio processing.
-    Uses orpheus-cpp package which runs on CPU/GPU via llama.cpp backend.
-    Works on Windows, Linux, and macOS without vLLM dependency.
+    Replaces llama.cpp backend with Pure Python stack for easier maintenance.
+    Works on Windows/Linux/macOS without C++ compilation.
     
     Features:
+    - Uses Transformers with optional Unsloth acceleration
+    - Automatic fallback to fp16 if bitsandbytes unavailable
+    - Proper SNAC code extraction from decoded text
     - Supports inline emotion tags: `<laugh>`, `<chuckle>`, `<sigh>`, `<cough>`, `<sniffle>`, `<groan>`, `<yawn>`, `<gasp>`
-    - Additional emotion descriptors for prompts (model-dependent): `happy`, `sad`, `angry`, `excited`, `surprised`, `whisper`, `fast`, `slow`, `crying`, etc.
-    - Long-form processing: Sentence batching + crossfade stitching for better audio continuity
     
     Requirements:
-    - Python 3.10-3.12 for pre-built CUDA wheels (Python 3.13 needs source build)
-    - pip install orpheus-cpp llama-cpp-python
+    - pip install snac transformers torchaudio accelerate
+    - Optional: pip install unsloth bitsandbytes (for acceleration and 4-bit quantization)
     
     Args:
         text: Input text to synthesize
         output_file: Path to save WAV output
         lang: Language (English, French, German, Korean, Hindi, Mandarin, Spanish, Italian)
         voice: Voice identifier (e.g., "en_tara", "fr_speaker_0")
+        keep_models: Keep models loaded in memory for faster subsequent runs
     """
+    import torch
     import numpy as np
     from scipy.io.wavfile import write as wav_write
     
-    # Check for llama-cpp-python first (more likely to fail)
     try:
-        import llama_cpp
-    except ImportError:
+        from snac import SNAC
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torchaudio
+    except ImportError as e:
         raise ImportError(
-            "[TTSS] llama-cpp-python not installed or incompatible.\n\n"
-            "For Python 3.10-3.12 with CUDA:\n"
-            "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124\n\n"
-            "For Python 3.10-3.12 CPU only:\n"
-            "  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu\n\n"
-            "⚠️ Python 3.13: No pre-built wheels available. Requires building from source with CUDA toolkit.\n"
-            "   See: https://github.com/abetlen/llama-cpp-python#installation"
+            "[TTSS] Missing dependencies for Orpheus TTS.\n"
+            "Run: pip install snac transformers torchaudio accelerate\n"
+            f"Missing: {e}"
         )
-    
+
+    # Check if bitsandbytes is available for 4-bit quantization
     try:
-        from orpheus_cpp import OrpheusCpp
+        import bitsandbytes
+        has_bitsandbytes = True
+        print("[TTSS] bitsandbytes detected - will use 4-bit quantization")
     except ImportError:
-        raise ImportError(
-            "[TTSS] Orpheus TTS not installed. Run:\n"
-            "  pip install orpheus-cpp\n\n"
-            "Note: First run will download ~3GB GGUF model."
+        has_bitsandbytes = False
+        print("[TTSS] bitsandbytes not available - using fp16 (requires more VRAM)")
+
+    # Get Model ID - use unified model for all languages
+    model_id = orpheus_model_id
+    print(f"[TTSS] Loading Orpheus model: {model_id}")
+    
+    # Determine device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
+        print("[TTSS] WARNING: No CUDA detected. Orpheus on CPU will be extremely slow!")
+    
+    # Load Model & Tokenizer
+    model = None
+    tokenizer = None
+    
+    # Try Unsloth first (optional acceleration)
+    try:
+        from unsloth import FastLanguageModel
+        if has_bitsandbytes:
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=model_id,
+                max_seq_length=2048,
+                dtype=None, 
+                load_in_4bit=True,
+            )
+        else:
+            model, tokenizer = FastLanguageModel.from_pretrained(
+                model_name=model_id,
+                max_seq_length=2048,
+                dtype=torch.float16 if device == "cuda" else torch.float32,
+            )
+        FastLanguageModel.for_inference(model)
+        print("[TTSS] Loaded with Unsloth acceleration")
+    except ImportError:
+        print("[TTSS] Unsloth not found, using standard Transformers...")
+    
+    # Fall back to standard Transformers if Unsloth failed
+    if model is None:
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        
+        if has_bitsandbytes and device == "cuda":
+            print("[TTSS] Loading in 4-bit mode...")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map="auto",
+                load_in_4bit=True,
+                torch_dtype=torch.float16,
+            )
+        else:
+            print("[TTSS] Loading in fp16/fp32 mode (no quantization)...")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                device_map="auto" if device == "cuda" else None,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            )
+
+    # Load SNAC Decoder
+    try:
+        snac_device = device if device == "cuda" else "cpu"
+        snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").to(snac_device)
+    except Exception as e:
+        raise RuntimeError(f"[TTSS] Failed to load SNAC decoder: {e}")
+
+    # Format Prompt (CRITICAL - Orpheus expects this exact format)
+    prompt = f"<|audio|>{voice}: {text}<|eot_id|>"
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+    # Generate Tokens
+    print("[TTSS] Generating Orpheus tokens...")
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=2048,
+            temperature=0.7,
+            do_sample=True,
+            repetition_penalty=1.1
         )
     
-    # Default to English model if language not found
-    orpheus_repo = orpheus_models.get(lang, orpheus_models.get("English", "isaiahbjork/orpheus-3b-0.1-ft-Q4_K_M-GGUF"))
+    # Decode to text and extract SNAC codes
+    # The model outputs text containing SNAC codes in format like: [1,2,3][4,5,6]...
+    decoded_text = tokenizer.decode(outputs[0], skip_special_tokens=False)
+    print(f"[TTSS] Decoded output preview: {decoded_text[:200]}...")
     
-    # Download main Orpheus model
-    orpheus_model_path = os.path.join(tts_orpheus_path, os.path.basename(orpheus_repo))
-    if not os.path.exists(orpheus_model_path):
-        print(f"[TTSS] Downloading Orpheus model to: {orpheus_model_path}")
-        from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id=orpheus_repo,
-            local_dir=orpheus_model_path,
-            local_dir_use_symlinks=False,
-        )
+    # Extract SNAC codes from the decoded text
+    snac_codes = _extract_snac_codes(decoded_text)
     
-    # Download SNAC model
-    snac_model_path = os.path.join(tts_orpheus_path, "snac_24khz-ONNX")
-    if not os.path.exists(snac_model_path):
-        print(f"[TTSS] Downloading SNAC model to: {snac_model_path}")
-        from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id=snac_repo_id,
-            local_dir=snac_model_path,
-            local_dir_use_symlinks=False,
-        )
+    if snac_codes is None or len(snac_codes) == 0:
+        raise RuntimeError("[TTSS] Failed to extract SNAC codes from model output")
     
-    # Initialize Orpheus with llama.cpp backend (GPU enabled)
-    # Long-form audio processing: Split text into sentences for better quality
-    import re
-
-    # Split text into sentences (handle common sentence endings)
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
-
-    # If text is short, process as single chunk
-    if len(sentences) <= 1 or len(text) < 500:
-        text_chunks = [text]
-    else:
-        # Group sentences into chunks (aim for ~200-300 words per chunk)
-        text_chunks = []
-        current_chunk = ""
+    print(f"[TTSS] Extracted {len(snac_codes)} SNAC code groups")
     
-        for sentence in sentences:
-            if len(current_chunk + sentence) < 300:  # Character count approximation
-                current_chunk += sentence + " "
-            else:
-                if current_chunk:
-                    text_chunks.append(current_chunk.strip())
-                current_chunk = sentence + " "
-    
-        if current_chunk:
-            text_chunks.append(current_chunk.strip())
-
-    print(f"[TTSS] Processing {len(text_chunks)} text chunks for long-form audio")
-
-    # Initialize Orpheus with correct language
-    lang_code = lang[:2].lower()  # "en", "fr", "de", etc.
-    # Use cached orpheus instance if available (ModelManager)
-    n_gpu_layers = -1
-    orpheus = model_manager.get_orpheus(lang, n_gpu_layers=n_gpu_layers)
-
-    # Process each chunk and collect audio
-    all_audio_chunks = []
-    sample_rate = None
-
-    for i, chunk_text in enumerate(text_chunks):
-        print(f"[TTSS] Processing chunk {i+1}/{len(text_chunks)}: {chunk_text[:50]}...")
-    
-        # Generate speech for this chunk
-        chunk_buffer = []
-        chunk_sample_rate = None
-    
-        for j, (sr, audio_chunk) in enumerate(orpheus.stream_tts_sync(chunk_text, options={"voice_id": voice})):
-                if chunk_sample_rate is None:
-                    chunk_sample_rate = sr
-                    if sample_rate is None:
-                        sample_rate = sr
-                # Normalize and convert to mono/float32 for safe concatenation
-                def _to_mono_float32(arr):
-                    arr = np.asarray(arr)
-                    # Convert integer arrays to float32 normalized -1..1
-                    if arr.dtype.kind in ('i', 'u'):
-                        try:
-                            maxv = np.iinfo(arr.dtype).max
-                            arr = arr.astype(np.float32) / float(maxv)
-                        except Exception:
-                            arr = arr.astype(np.float32)
-                    else:
-                        arr = arr.astype(np.float32)
-                    if arr.ndim > 1:
-                        # Many audio libraries return shape (channels, samples) or (samples, channels)
-                        if arr.shape[0] <= 4 and arr.shape[1] > arr.shape[0]:
-                            # shape (channels, samples)
-                            arr = arr.mean(axis=0)
-                        else:
-                            # shape (samples, channels)
-                            arr = arr.mean(axis=1)
-                    return arr
-                audio_chunk = _to_mono_float32(audio_chunk)
-                chunk_buffer.append(audio_chunk)
-    
-        if chunk_buffer:
-            # Concatenate chunk audio (ensure numpy arrays)
-            chunk_audio = np.concatenate([np.asarray(x, dtype=np.float32) for x in chunk_buffer], axis=0)
-            all_audio_chunks.append(chunk_audio)
-
-    # If we failed to capture a sample rate, fall back to 24000
-    if sample_rate is None and len(all_audio_chunks) > 0:
+    # Decode SNAC codes to audio
+    print("[TTSS] Decoding SNAC codes to audio...")
+    try:
+        # Convert SNAC codes to tensor format expected by SNAC decoder
+        # SNAC expects shape: [batch, num_hierarchies, sequence_length]
+        snac_tensor = torch.tensor(snac_codes, dtype=torch.long).unsqueeze(0).to(snac_device)
+        
+        # Decode to audio waveform
+        with torch.no_grad():
+            audio_output = snac_model.decode(snac_tensor)
+        
+        # Convert to numpy and ensure proper shape
+        audio_np = audio_output.cpu().numpy()
+        if audio_np.ndim > 1:
+            audio_np = audio_np.squeeze()
+        
+        # Normalize to [-1, 1] range
+        max_abs = np.abs(audio_np).max()
+        if max_abs > 0:
+            audio_np = audio_np / max_abs
+        
+        # Convert to int16 for WAV output
+        audio_int16 = (audio_np * 32767.0).astype(np.int16)
+        
+        # Save as WAV file (SNAC uses 24kHz)
         sample_rate = 24000
-
-    # Crossfade stitching between chunks
-    if len(all_audio_chunks) > 1:
-        print("[TTSS] Applying crossfade stitching between audio chunks")
-
-        # Crossfade parameters (200ms at 24kHz)
-        crossfade_samples = int(0.2 * sample_rate)  # 200ms crossfade
-
-        stitched_audio = [all_audio_chunks[0]]  # First chunk unchanged
-
-        for i in range(1, len(all_audio_chunks)):
-            prev_chunk = stitched_audio[-1]
-            curr_chunk = all_audio_chunks[i]
-
-            # Ensure we have enough samples for crossfade
-            crossfade_len = min(crossfade_samples, len(prev_chunk), len(curr_chunk))
-
-            if crossfade_len > 0:
-                # Create crossfade window (linear fade out/in)
-                fade_out = np.linspace(1.0, 0.0, crossfade_len)
-                fade_in = np.linspace(0.0, 1.0, crossfade_len)
-
-                # Apply crossfade
-                prev_end = prev_chunk[-crossfade_len:]
-                curr_start = curr_chunk[:crossfade_len]
-
-                # Mix the overlapping regions
-                mixed_region = prev_end * fade_out + curr_start * fade_in
-
-                # Combine: prev_chunk (without overlap) + mixed_region + curr_chunk (without overlap)
-                combined = np.concatenate([
-                    prev_chunk[:-crossfade_len],
-                    mixed_region,
-                    curr_chunk[crossfade_len:]
-                ])
-
-                stitched_audio[-1] = combined
-            else:
-                # No crossfade possible, just concatenate
-                stitched_audio[-1] = np.concatenate([prev_chunk, curr_chunk])
-
-        # Final concatenation
-        audio = stitched_audio[0]
-    else:
-        # Single chunk, no stitching needed
-        audio = all_audio_chunks[0] if all_audio_chunks else np.array([])
-
-    # Save final audio (convert to int16 for wider player compatibility)
-    if len(audio) > 0:
-        # Ensure numpy float32 in -1..1 before scaling to int16
-        audio = np.asarray(audio, dtype=np.float32)
-        max_abs = float(np.max(np.abs(audio))) if audio.size > 0 else 0.0
-        if max_abs > 1.0:
-            # Normalize by maximum to avoid clipping
-            audio = audio / max_abs
-        # Convert to int16
-        int_audio = (audio * 32767.0).astype(np.int16)
-        wav_write(output_file, sample_rate, int_audio)
+        wav_write(output_file, sample_rate, audio_int16)
+        
+        print(f"[TTSS] Audio saved: {output_file}")
+        
+    except Exception as e:
+        raise RuntimeError(f"[TTSS] Failed to decode SNAC codes to audio: {e}")
     
-    # Decide per-node keep vs global default
-    effective_keep = keep_models
-    # Unload the orpheus instance if configured to not keep models loaded
-    if not effective_keep:
+    # Clean up models if not keeping them loaded
+    if not keep_models:
         try:
-            model_manager.unload_orpheus(lang, n_gpu_layers=n_gpu_layers)
+            del model
+            del tokenizer
+            del snac_model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         except Exception:
             pass
+
+
+def _extract_snac_codes(decoded_text):
+    """
+    Extract SNAC codes from the decoded model output.
     
-    # If no audio generated, raise
-    if len(audio) == 0:
-        raise RuntimeError("[TTSS] Orpheus generated no audio")
+    The Orpheus model outputs SNAC codes in a specific format within the text.
+    This function parses that format and returns the codes as a list.
+    
+    Args:
+        decoded_text: The decoded text from the model
+        
+    Returns:
+        List of SNAC codes or None if extraction failed
+    """
+    # Look for SNAC code patterns in the decoded text
+    # Pattern 1: [code1,code2,code3][code4,code5,code6]...
+    pattern1 = r'\[([^\]]+)\]'
+    matches = re.findall(pattern1, decoded_text)
+    
+    if matches:
+        try:
+            # Parse each group of codes
+            all_codes = []
+            for match in matches:
+                codes = [int(c.strip()) for c in match.split(',') if c.strip().isdigit()]
+                if codes:
+                    all_codes.append(codes)
+            
+            if all_codes:
+                # Transpose to get the right shape for SNAC
+                # SNAC expects [num_hierarchies, sequence_length]
+                max_len = max(len(c) for c in all_codes)
+                padded_codes = []
+                for codes in all_codes:
+                    # Pad if needed
+                    padded = codes + [0] * (max_len - len(codes))
+                    padded_codes.append(padded)
+                
+                # Transpose
+                snac_array = np.array(padded_codes).T
+                return snac_array.tolist()
+        except Exception as e:
+            print(f"[TTSS] Warning: Failed to parse SNAC codes: {e}")
+    
+    # Pattern 2: Look for continuous digit sequences
+    # This is a fallback if the above pattern doesn't match
+    pattern2 = r'<\|audio\|>.*?<\|eot_id\|>'
+    audio_section = re.search(pattern2, decoded_text, re.DOTALL)
+    
+    if audio_section:
+        audio_text = audio_section.group(0)
+        # Try to extract numbers from the audio section
+        numbers = re.findall(r'\d+', audio_text)
+        if numbers:
+            try:
+                codes = [int(n) for n in numbers]
+                # Reshape into SNAC format (assuming 7 hierarchies for 24kHz SNAC)
+                num_hierarchies = 7
+                num_frames = len(codes) // num_hierarchies
+                if num_frames > 0:
+                    snac_codes = np.array(codes[:num_frames * num_hierarchies]).reshape(num_frames, num_hierarchies)
+                    return snac_codes.tolist()
+            except Exception as e:
+                print(f"[TTSS] Warning: Fallback SNAC extraction failed: {e}")
+    
+    print("[TTSS] Warning: Could not extract SNAC codes from model output")
+    return None
+
