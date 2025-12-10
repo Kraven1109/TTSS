@@ -34,6 +34,13 @@ def synth_edge_tts(text, output_file, voice_name, speed):
     """Synthesize using Microsoft Edge TTS via CLI (avoids async issues)."""
     voice = voice_name if voice_name else "en-US-AriaNeural"
     
+    # Validate and clean text
+    if not text or not text.strip():
+        raise ValueError("[TTSS] Empty text provided to edge-tts")
+    
+    # edge-tts can be sensitive to certain characters - ensure clean text
+    text = text.strip()
+    
     # Use edge-tts CLI to avoid asyncio conflicts with ComfyUI
     edge_tts_cmd = _get_edge_tts_cli()
     cmd = [
@@ -50,9 +57,21 @@ def synth_edge_tts(text, output_file, voice_name, speed):
         cmd.extend(['--rate', rate])
     
     try:
+        print(f"[TTSS] edge-tts: Synthesizing with voice '{voice}', text length: {len(text)} chars")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            raise RuntimeError(f"edge-tts failed: {result.stderr}")
+            error_msg = result.stderr if result.stderr else result.stdout
+            # Provide more helpful error message
+            if "NoAudioReceived" in error_msg:
+                raise RuntimeError(
+                    f"edge-tts NoAudioReceived error. This usually indicates:\n"
+                    f"  1. Network connectivity issues\n"
+                    f"  2. Microsoft's TTS service is temporarily unavailable\n"
+                    f"  3. Voice '{voice}' may not support this text\n"
+                    f"  Try: Different voice, check network, or retry later.\n"
+                    f"  Original error: {error_msg}"
+                )
+            raise RuntimeError(f"edge-tts failed: {error_msg}")
     except FileNotFoundError:
         # edge-tts CLI not in PATH, try Python API with thread
         _synth_edge_tts_threaded(text, output_file, voice, speed)
