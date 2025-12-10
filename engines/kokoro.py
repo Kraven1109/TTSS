@@ -184,7 +184,6 @@ def synth_kokoro(text, output_file, voice, lang_code, speed, keep_models,
         raise RuntimeError("[TTSS] Kokoro generated no audio")
     
     # Save audio
-    import soundfile as sf
     sf.write(output_file, final_audio, sample_rate)
     
     # Decide final keep_models policy (per-node overrides global)
