@@ -243,6 +243,9 @@ class ModelManager:
 # Global ModelManager for this nodes module
 MODEL_MANAGER = ModelManager()
 
+def get_bool_options():
+    return ["True", "False"]
+
 
 def get_pyttsx3_voices():
     """Get available pyttsx3 system voices."""
@@ -277,7 +280,7 @@ def get_edge_tts_voices():
     
     # Try to fetch using edge-tts CLI
     try:
-        edge_tts_cmd = _get_edge_tts_cli()
+        edge_tts_cmd = engines._get_edge_tts_cli()
         result = subprocess.run(
             [edge_tts_cmd, '--list-voices'],
             capture_output=True, text=True, timeout=30
@@ -399,6 +402,8 @@ class TTSSTextToSpeech:
         kokoro_voices = get_kokoro_voices()
         orpheus_voices = get_orpheus_voices()
         csm_voices = get_csm_voices()
+        keep_model = get_bool_options()
+        show_orpheus_help = get_bool_options()
         
         return {
             "required": {
@@ -413,8 +418,8 @@ class TTSSTextToSpeech:
                     "max": 2.0,
                     "step": 0.1
                 }),
-                "keep_models": ("BOOL", {"default": False, "tooltip": "Keep models in memory after synthesis for faster subsequent runs (uses more RAM/GPU)"}),
-                "show_orpheus_help": ("BOOL", {"default": False, "tooltip": "Show Orpheus inline tags & descriptors in logs and warnings"}),
+                "keep_models": (keep_model, {"default": "False", "tooltip": "Keep models in memory after synthesis for faster subsequent runs (uses more RAM/GPU)"}),
+                "show_orpheus_help": (show_orpheus_help, {"default": "False", "tooltip": "Show Orpheus inline tags & descriptors in logs and warnings"}),
                 # Voice dropdowns for each engine
                 "edge_voice": (edge_voices, {"default": "en-US-AriaNeural"}),
                 "pyttsx3_voice": (pyttsx3_voices, {"default": pyttsx3_voices[0] if pyttsx3_voices else "default"}),
@@ -488,9 +493,9 @@ class TTSSTextToSpeech:
             elif engine == "edge-tts":
                 self._synth_edge_tts(final_text, output_file, voice_name, speed)
             elif engine == "kokoro":
-                self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed, keep_models)
+                self._synth_kokoro(final_text, output_file, voice_name, kokoro_lang, speed, keep_models == "True")
             elif engine == "orpheus":
-                self._synth_orpheus(final_text, output_file, orpheus_lang, voice_name, keep_models)
+                self._synth_orpheus(final_text, output_file, orpheus_lang, voice_name, keep_models == "True")
             elif engine == "csm":
                 self._synth_csm(final_text, output_file, voice_name, context_audio)
             else:

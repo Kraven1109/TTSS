@@ -167,8 +167,16 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
     print("[TTSS] Decoding SNAC codes to audio...")
     try:
         # Convert SNAC codes to tensor format expected by SNAC decoder
-        # SNAC expects shape: [batch, num_hierarchies, sequence_length]
-        snac_tensor = torch.tensor(snac_codes, dtype=torch.long).unsqueeze(0).to(snac_device)
+        # SNAC decode() expects shape: [num_hierarchies, sequence_length] (NO batch dimension)
+        # snac_codes from _extract_snac_codes is already [num_hierarchies, sequence_length]
+        snac_tensor = torch.tensor(snac_codes, dtype=torch.long).to(snac_device)
+        print(f"[TTSS] SNAC tensor shape: {snac_tensor.shape} (expected: [num_hierarchies=3, sequence_length])")
+        
+        # Verify we have the correct shape
+        if snac_tensor.ndim != 2:
+            raise RuntimeError(f"[TTSS] SNAC codes have wrong dimensions: {snac_tensor.shape}, expected 2D [hierarchies, sequence]")
+        if snac_tensor.shape[0] != 3:
+            raise RuntimeError(f"[TTSS] SNAC codes have {snac_tensor.shape[0]} hierarchies, expected 3")
         
         # Decode to audio waveform
         with torch.no_grad():
@@ -197,7 +205,7 @@ def synth_orpheus(text, output_file, lang, voice, keep_models,
         raise RuntimeError(f"[TTSS] Failed to decode SNAC codes to audio: {e}")
     
     # Clean up models if not keeping them loaded
-    if not keep_models:
+    if not keep_models == "True":
         try:
             del model
             del tokenizer
@@ -212,7 +220,7 @@ def _extract_snac_codes(decoded_text):
     """
     Extract SNAC codes from the decoded model output.
     
-    The Orpheus model outputs SNAC codes in a specific format within the text.
+    Handles both bracketed format [1,2,3,4,5,6,7] and raw numbers.
     SNAC expects shape: [num_hierarchies, sequence_length]
     
     Args:
@@ -222,54 +230,60 @@ def _extract_snac_codes(decoded_text):
         numpy array of SNAC codes with shape [num_hierarchies, sequence_length] or None if extraction failed
     """
     import numpy as np
+    import re
+
+    # Debug: Print first 500 chars of decoded text to understand format
+    print(f"[TTSS] Decoded text preview: {decoded_text[:500]}...")
     
-    # Look for SNAC code patterns in the decoded text
-    # Pattern 1: [code1,code2,code3][code4,code5,code6]...
-    # Each bracket contains codes for one time frame across all hierarchies
-    pattern1 = r'\[([^\]]+)\]'
-    matches = re.findall(pattern1, decoded_text)
-    
+    # Pattern 1: Bracketed SNAC codes [1,2,3,4,5,6,7][8,9,10,11,12,13,14]...
+    matches = re.findall(r'\[([^\]]+)\]', decoded_text)
     if matches:
+        print(f"[TTSS] Found {len(matches)} bracketed matches")
         try:
-            # Parse each group of codes (each match is one time frame)
-            all_frames = []
+            frames = []
             for match in matches:
-                codes = [int(c.strip()) for c in match.split(',') if c.strip().replace('-', '').isdigit()]
+                codes = [int(c.strip()) for c in match.split(',') if c.strip().lstrip('-').isdigit()]
                 if codes:
-                    all_frames.append(codes)
-            
-            if all_frames:
-                # Convert to numpy array: [sequence_length, num_hierarchies]
-                frames_array = np.array(all_frames)
-                
-                # Transpose to get [num_hierarchies, sequence_length] as expected by SNAC
-                snac_array = frames_array.T
-                return snac_array
+                    frames.append(codes)
+            if frames:
+                arr = np.array(frames)
+                print(f"[TTSS] Extracted {len(frames)} frames with shape {arr.shape}")
+                return arr.T  # [num_hierarchies, sequence_length]
         except Exception as e:
-            print(f"[TTSS] Warning: Failed to parse SNAC codes: {e}")
-    
-    # Pattern 2: Look for continuous digit sequences as fallback
-    pattern2 = r'<\|audio\|>.*?<\|eot_id\|>'
-    audio_section = re.search(pattern2, decoded_text, re.DOTALL)
-    
-    if audio_section:
-        audio_text = audio_section.group(0)
-        # Try to extract numbers from the audio section
-        numbers = re.findall(r'-?\d+', audio_text)
-        if numbers:
-            try:
-                codes = [int(n) for n in numbers]
-                # Reshape into SNAC format (assuming 7 hierarchies for 24kHz SNAC)
-                num_hierarchies = 7
-                num_frames = len(codes) // num_hierarchies
-                if num_frames > 0:
-                    # Reshape to [num_frames, num_hierarchies] then transpose to [num_hierarchies, num_frames]
-                    snac_codes = np.array(codes[:num_frames * num_hierarchies]).reshape(num_frames, num_hierarchies).T
-                    return snac_codes
-            except Exception as e:
-                print(f"[TTSS] Warning: Fallback SNAC extraction failed: {e}")
-    
-    print("[TTSS] Warning: Could not extract SNAC codes from model output")
+            print(f"[TTSS] Bracket parse failed: {e}")
+
+    # Pattern 2: Raw numbers fallback
+    numbers = re.findall(r'-?\d+', decoded_text)
+    print(f"[TTSS] Found {len(numbers)} raw numbers")
+    if numbers:
+        print(f"[TTSS] First 20 numbers: {numbers[:20]}")
+        try:
+            codes = [int(n) for n in numbers]
+            
+            # SNAC validation: SNAC uses 3 codebooks, not 7!
+            # Codes should be in valid range (typically 0-4095 for 12-bit codes)
+            max_valid_code = 4095
+            invalid_codes = [c for c in codes if c > max_valid_code or c < 0]
+            if invalid_codes:
+                print(f"[TTSS] WARNING: Found {len(invalid_codes)} codes outside valid SNAC range [0-{max_valid_code}]")
+                print(f"[TTSS] Invalid codes: {invalid_codes[:10]}...")
+                # Clamp codes to valid range
+                codes = [max(0, min(c, max_valid_code)) for c in codes]
+                print(f"[TTSS] Clamped codes to valid range")
+            
+            # SNAC uses 3 codebooks, not 7!
+            num_hierarchies = 3  # SNAC has 3 quantizers/codebooks
+            num_frames = len(codes) // num_hierarchies
+            print(f"[TTSS] Can make {num_frames} frames with {num_hierarchies} SNAC codebooks")
+            if num_frames > 0:
+                arr = np.array(codes[:num_frames * num_hierarchies]).reshape(num_frames, num_hierarchies).T
+                print(f"[TTSS] Final SNAC array shape: {arr.shape}")
+                print(f"[TTSS] SNAC code range: [{arr.min()}, {arr.max()}]")
+                return arr
+        except Exception as e:
+            print(f"[TTSS] Fallback parse failed: {e}")
+
+    print("[TTSS] Warning: No SNAC codes found")
     return None
 
 
